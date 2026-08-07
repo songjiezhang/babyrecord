@@ -22,7 +22,7 @@ docker compose up -d
 
 构建配置分为两类：
 
-- GitHub Actions Variables：`DEFAULT_SYNC_ENDPOINT`、`GITHUB_PROXY_BASE`。它们会进入 APK，属于公开构建配置而非口令。
+- GitHub Actions Variables：`DEFAULT_SYNC_ENDPOINT`、`DOWNLOAD_PROXY_BASE`。它们会进入 APK，属于公开构建配置而非口令。
 - GitHub Actions Secrets：Android keystore、别名与密码。同步密码和管理员 PIN 不进入 GitHub 构建环境。
 
 应用里的下载地址按“代理基础地址 + `github.com/<仓库>/releases/...`”生成。原生权限、Expo SDK 或依赖变化时发布新 APK；未来若启用 EAS Update，可再让同一原生版本接收兼容的 JavaScript 与资源更新。
