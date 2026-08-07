@@ -1,0 +1,14 @@
+services:
+  api:
+    image: babyrecord-api:local
+    pull_policy: build
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+
+  web:
+    image: babyrecord:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile

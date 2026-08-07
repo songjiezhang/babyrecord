@@ -1,0 +1,80 @@
+name: Build Android release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+      EXPO_PUBLIC_DEFAULT_SYNC_ENDPOINT: ${{ vars.DEFAULT_SYNC_ENDPOINT }}
+      EXPO_PUBLIC_GITHUB_REPOSITORY: ${{ github.repository }}
+      EXPO_PUBLIC_GITHUB_PROXY_BASE: ${{ vars.GITHUB_PROXY_BASE }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release.keystore
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project
+        run: pnpm exec expo prebuild --platform android --clean --no-install
+
+      - name: Restore release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+
+      - name: Build signed APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Name release asset
+        run: cp android/app/build/outputs/apk/release/app-release.apk "babyrecord-${GITHUB_REF_NAME}.apk"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: babyrecord-${{ github.ref_name }}
+          path: babyrecord-${{ github.ref_name }}.apk
+
+      - name: Publish GitHub Release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "babyrecord-${GITHUB_REF_NAME}.apk" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "babyrecord-${GITHUB_REF_NAME}.apk" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi

@@ -1,0 +1,39 @@
+name: babyrecord
+
+services:
+  api:
+    image: "ghcr.io/${GHCR_OWNER:-songjiezhang}/${GHCR_IMAGE_NAME:-babyrecord}-api:${BABYRECORD_TAG:-latest}"
+    pull_policy: always
+    container_name: babyrecord-api
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      ADMIN_PIN: "${ADMIN_PIN:?请在 .env 中设置 ADMIN_PIN}"
+      SYNC_PASSWORD: "${SYNC_PASSWORD:?请在 .env 中设置 SYNC_PASSWORD}"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  web:
+    image: "ghcr.io/${GHCR_OWNER:-songjiezhang}/${GHCR_IMAGE_NAME:-babyrecord}:${BABYRECORD_TAG:-latest}"
+    pull_policy: always
+    container_name: babyrecord-web
+    restart: unless-stopped
+    ports:
+      - "${BABYRECORD_PORT:-8080}:80"
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

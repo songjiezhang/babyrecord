@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "宝宝日记",
+    "slug": "baby-daybook",
+    "version": "1.0.1",
+    "platforms": [
+      "android",
+      "web"
+    ],
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F7F6F2"
+    },
+    "android": {
+      "package": "com.sjzhang.babyrecord",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#F7F6F2"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "./plugins/withAndroidReleaseSigning"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    }
+  }
+}
