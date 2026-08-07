@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: '1'
+      NODE_ENV: production
       EXPO_PUBLIC_DEFAULT_SYNC_ENDPOINT: ${{ vars.DEFAULT_SYNC_ENDPOINT }}
       EXPO_PUBLIC_GITHUB_REPOSITORY: ${{ github.repository }}
       EXPO_PUBLIC_GITHUB_PROXY_BASE: ${{ vars.DOWNLOAD_PROXY_BASE }}
