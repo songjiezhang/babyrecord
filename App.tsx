@@ -437,7 +437,7 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
           <View style={styles.adminPinCard}>
             <View style={styles.adminPinIcon}><Icon name="shield-lock-outline" size={31} color={C.peach} /></View>
             <Text style={styles.adminPinTitle}>验证管理员身份</Text>
-            <Text style={styles.adminPinDescription}>请输入“{pendingAdminRole?.name}”的 4 位管理员 PIN。</Text>
+            <Text style={styles.adminPinDescription}>请输入“{pendingAdminRole?.name}”的 4–8 位管理员 PIN。</Text>
             <View style={[styles.pinInputWrap, !!error && styles.pinInputError]}>
               <Icon name="lock-outline" size={21} color={error ? C.danger : C.navy} />
               <TextInput value={pin} onChangeText={(value) => { setPin(value.replace(/\D/g, '').slice(0, 8)); setError(''); }} style={styles.pinInput} keyboardType="number-pad" secureTextEntry maxLength={8} placeholder="4–8 位 PIN" placeholderTextColor="#A6ADB6" autoFocus onSubmitEditing={verifyAdminPin} />

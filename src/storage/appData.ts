@@ -25,7 +25,7 @@ export async function saveSharedAppData(payload: SharedAppData) {
   const envelope: VersionedDataEnvelope<SharedAppData> = {
     schemaVersion: CURRENT_DATA_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    appVersion: '1.0.1',
+    appVersion: '1.0.2',
     payload,
   };
   await AsyncStorage.setItem(APP_DATA_KEY, JSON.stringify(envelope));
