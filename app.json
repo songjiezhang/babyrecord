@@ -2,7 +2,7 @@
   "expo": {
     "name": "宝宝日记",
     "slug": "baby-daybook",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "platforms": [
       "android",
       "web"
@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.sjzhang.babyrecord",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#F7F6F2"

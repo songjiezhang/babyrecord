@@ -2,7 +2,7 @@
  * Persistent data must always be wrapped in a versioned envelope.
  * UI models may change freely; stored data is upgraded through explicit migrations.
  */
-export const CURRENT_DATA_SCHEMA_VERSION = 2;
+export const CURRENT_DATA_SCHEMA_VERSION = 3;
 
 export type VersionedDataEnvelope<T = unknown> = {
   schemaVersion: number;
@@ -24,7 +24,7 @@ export type UserPreferencesV1 = {
 export type DataMigration = {
   from: number;
   to: number;
-  migrate: (payload: unknown) => unknown;
+  migrate: (payload: unknown, envelope: VersionedDataEnvelope) => unknown;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -47,9 +47,45 @@ function addRecordTimeModes(payload: unknown) {
   return { ...payload, items, customProjects };
 }
 
+function legacyRecordDate(value: Record<string, unknown>, envelope: VersionedDataEnvelope) {
+  const timestamp = Number(value.id);
+  const date = Number.isFinite(timestamp) && timestamp > 1_000_000_000_000
+    ? new Date(timestamp)
+    : new Date(envelope.exportedAt);
+  if (Number.isNaN(date.getTime())) return envelope.exportedAt.slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function addRecordDatesAndRemovePrototypeData(payload: unknown, envelope: VersionedDataEnvelope) {
+  if (!isObject(payload)) return payload;
+  const prototypeItemIds = new Set(['1', '2', '3', '4', '5', '6', '7', '8']);
+  const prototypeTodoIds = new Set(['t1', 't2', 't3']);
+  const prototypeProjectIds = new Set(['c1', 'c2']);
+  const items = Array.isArray(payload.items)
+    ? payload.items
+        .filter((value) => !isObject(value) || !prototypeItemIds.has(String(value.id ?? '')))
+        .map((value) => isObject(value) && typeof value.dateKey !== 'string'
+          ? { ...value, dateKey: legacyRecordDate(value, envelope) }
+          : value)
+    : [];
+  const todos = Array.isArray(payload.todos)
+    ? payload.todos.filter((value) => !isObject(value) || !prototypeTodoIds.has(String(value.id ?? '')))
+    : [];
+  const customProjects = Array.isArray(payload.customProjects)
+    ? payload.customProjects.filter((value) => !isObject(value) || !prototypeProjectIds.has(String(value.id ?? '')))
+    : [];
+  const babyProfile = isObject(payload.babyProfile)
+    && payload.babyProfile.name === '小满'
+    && payload.babyProfile.birthDate === '2025-11-27'
+    ? { name: '宝宝', birthDate: '' }
+    : payload.babyProfile;
+  return { ...payload, items, todos, customProjects, babyProfile };
+}
+
 // Published migrations are append-only and must stay deterministic.
 export const DATA_MIGRATIONS: DataMigration[] = [
   { from: 1, to: 2, migrate: addRecordTimeModes },
+  { from: 2, to: 3, migrate: addRecordDatesAndRemovePrototypeData },
 ];
 
 export function migrateEnvelope(envelope: VersionedDataEnvelope): VersionedDataEnvelope {
@@ -64,7 +100,7 @@ export function migrateEnvelope(envelope: VersionedDataEnvelope): VersionedDataE
     current = {
       ...current,
       schemaVersion: migration.to,
-      payload: migration.migrate(current.payload),
+      payload: migration.migrate(current.payload, current),
     };
   }
   return current;

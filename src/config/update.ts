@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.0.2';
+export const APP_VERSION = '1.0.3';
 export const ANDROID_APK_NAME = `babyrecord-v${APP_VERSION}.apk`;
 
 const githubRepository = process.env.EXPO_PUBLIC_GITHUB_REPOSITORY?.trim() ?? '';

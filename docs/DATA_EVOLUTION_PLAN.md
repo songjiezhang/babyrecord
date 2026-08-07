@@ -20,7 +20,7 @@
 版本号彼此独立：
 
 - `app_version`：用户安装的 APP 版本。
-- `schema_version`：本地导出包和 SQLite 数据结构版本。当前为 v2；v2 为记录和自定义项目补充稳定的 `time_mode`。
+- `schema_version`：本地导出包和 SQLite 数据结构版本。当前为 v3；v2 为记录和自定义项目补充稳定的 `time_mode`，v3 为每条记录补充本地日期并清理早期原型演示数据。
 - `api_version`：NAS 同步协议版本，例如 `/api/v1/sync`。
 
 服务端同步握手返回 `min_read_version`、`min_write_version` 和功能能力列表。过旧客户端可以只读导出，但不能继续写入无法安全理解的新结构。

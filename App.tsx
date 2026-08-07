@@ -4,6 +4,7 @@ import {
   Alert,
   Dimensions,
   KeyboardAvoidingView,
+  Keyboard,
   LayoutAnimation,
   Linking,
   Modal,
@@ -72,22 +73,32 @@ function useElderMode() {
   return useContext(ElderModeContext);
 }
 
+function standardFontSize(size: number) {
+  if (size >= 24) return Math.round(size * 1.05);
+  if (size >= 18) return size + 1;
+  if (size >= 12) return size + 2;
+  return size + 1;
+}
+
 function elderFontSize(size: number) {
-  if (size >= 26) return Math.round(size * 1.15);
-  if (size >= 20) return Math.round(size * 1.2);
-  if (size >= 17) return Math.round(size * 1.25);
-  if (size >= 14) return Math.max(18, Math.round(size * 1.3));
-  return Math.max(16, Math.round(size * 1.35));
+  const baseSize = standardFontSize(size);
+  if (baseSize >= 28) return Math.round(baseSize * 1.18);
+  if (baseSize >= 22) return Math.round(baseSize * 1.25);
+  if (baseSize >= 17) return Math.round(baseSize * 1.35);
+  return Math.max(18, Math.round(baseSize * 1.4));
 }
 
 function Text({ style, maxFontSizeMultiplier, ...props }: TextProps) {
   const elderMode = useElderMode();
   const flattened = StyleSheet.flatten(style);
-  const scaledStyle = elderMode && flattened?.fontSize
+  const scaledFontSize = flattened?.fontSize
+    ? elderMode ? elderFontSize(flattened.fontSize) : standardFontSize(flattened.fontSize)
+    : undefined;
+  const scaledStyle = flattened?.fontSize && scaledFontSize
     ? {
-        fontSize: elderFontSize(flattened.fontSize),
+        fontSize: scaledFontSize,
         lineHeight: flattened.lineHeight
-          ? Math.round(flattened.lineHeight * (elderFontSize(flattened.fontSize) / flattened.fontSize))
+          ? Math.round(flattened.lineHeight * (scaledFontSize / flattened.fontSize))
           : undefined,
       }
     : undefined;
@@ -97,7 +108,9 @@ function Text({ style, maxFontSizeMultiplier, ...props }: TextProps) {
 function TextInput({ style, maxFontSizeMultiplier, ...props }: TextInputProps) {
   const elderMode = useElderMode();
   const flattened = StyleSheet.flatten(style);
-  const scaledStyle = elderMode && flattened?.fontSize ? { fontSize: elderFontSize(flattened.fontSize) } : undefined;
+  const scaledStyle = flattened?.fontSize
+    ? { fontSize: elderMode ? elderFontSize(flattened.fontSize) : standardFontSize(flattened.fontSize) }
+    : undefined;
   return <RNTextInput {...props} style={[style, scaledStyle]} maxFontSizeMultiplier={maxFontSizeMultiplier} />;
 }
 
@@ -117,6 +130,7 @@ type RecordType = {
 
 type TimelineItem = {
   id: string;
+  dateKey: string;
   kind: RecordKind;
   time: string;
   endTime?: string;
@@ -191,32 +205,8 @@ const BABY_PROJECT_ICONS: { name: IconName; label: string }[] = [
   { name: 'star-four-points-outline', label: '其他' },
 ];
 
-const INITIAL_ITEMS: TimelineItem[] = [
-  { id: '1', kind: 'sleep', timeMode: 'range', time: '06:42', endTime: '07:18', title: '晨间小睡', detail: '36 分钟', note: '醒来时情绪很好' },
-  { id: '2', kind: 'feed', time: '07:26', title: '配方奶', detail: '160 ml', note: '约 12 分钟喝完' },
-  { id: '3', kind: 'supplement', time: '08:05', title: '维生素 D', detail: '1 滴 · 已完成' },
-  { id: '4', kind: 'diaper', time: '09:12', title: '换尿布', detail: '小便 · 较多' },
-  { id: '5', kind: 'activity', timeMode: 'range', time: '10:00', endTime: '10:35', title: '趴卧练习', detail: '35 分钟', note: '能抬头看玩具了' },
-  { id: '6', kind: 'feed', time: '11:18', title: '母乳亲喂', detail: '左 9 分 · 右 7 分' },
-  { id: '7', kind: 'diaper', time: '12:04', title: '换尿布', detail: '大便 · 黄色软便' },
-  { id: '8', kind: 'sleep', timeMode: 'range', time: '13:08', title: '午睡', detail: '睡眠中 · 1 小时 24 分', ongoing: true },
-];
-
-const INITIAL_TODOS: TodoItem[] = [
-  { id: 't1', kind: 'feed', time: '15:20', title: '下一次喂奶', reason: '近 7 天通常间隔 3 小时 46 分', done: false },
-  { id: 't2', kind: 'supplement', time: '18:00', title: '喂铁剂', reason: '根据最近 5 天的完成时间', done: false },
-  { id: 't3', kind: 'sleep', time: '20:25', title: '准备夜间入睡', reason: '近 7 天通常在 20:18–20:34', done: false },
-];
-
-const DAYS = [
-  { week: '一', day: '3' },
-  { week: '二', day: '4' },
-  { week: '三', day: '5' },
-  { week: '四', day: '6' },
-  { week: '五', day: '7' },
-  { week: '六', day: '8' },
-  { week: '日', day: '9' },
-];
+const INITIAL_ITEMS: TimelineItem[] = [];
+const INITIAL_TODOS: TodoItem[] = [];
 
 function typeFor(kind: RecordKind): RecordType {
   return RECORD_TYPES.find((item) => item.key === kind) ?? RECORD_TYPES[5]!;
@@ -252,6 +242,7 @@ function shortcutOptions(customProjects: CustomProject[]): QuickShortcutOption[]
 }
 
 function formatBirthDate(value: string) {
+  if (!value) return '未设置出生日期';
   const [year, month, day] = value.split('-');
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
@@ -281,6 +272,29 @@ function babyAgeFromBirthDate(value: string, reference = new Date()) {
 function nowTime() {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function dateFromKey(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year || new Date().getFullYear(), (month || 1) - 1, day || 1, 12);
+}
+
+function chineseWeekday(value: string) {
+  return ['日', '一', '二', '三', '四', '五', '六'][dateFromKey(value).getDay()] ?? '';
+}
+
+function dateTitle(value: string) {
+  const date = dateFromKey(value);
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function fullDateTitle(value: string) {
+  const date = dateFromKey(value);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 function durationBetween(start: string, end: string) {
@@ -465,7 +479,7 @@ export default function App() {
   const [backupOpen, setBackupOpen] = useState(false);
   const [backups, setBackups] = useState<DailyBackup[]>([]);
   const [tab, setTab] = useState<TabKey>('today');
-  const [selectedDay, setSelectedDay] = useState('8');
+  const [selectedDateKey, setSelectedDateKey] = useState(localDateKey());
   const [items, setItems] = useState<TimelineItem[]>(INITIAL_ITEMS);
   const [addOpen, setAddOpen] = useState(false);
   const [addIntent, setAddIntent] = useState<AddIntent | null>(null);
@@ -477,14 +491,11 @@ export default function App() {
   const [todoDraft, setTodoDraft] = useState<TodoItem | null>(null);
   const [toast, setToast] = useState('');
   const [elderMode, setElderMode] = useState(false);
-  const [babyProfile, setBabyProfile] = useState<BabyProfile>({ name: '小满', birthDate: '2025-11-27' });
+  const [babyProfile, setBabyProfile] = useState<BabyProfile>({ name: '宝宝', birthDate: '' });
   const [syncEndpoint, setSyncEndpoint] = useState(Platform.OS === 'web' ? '/sync' : DEFAULT_SYNC_ENDPOINT);
   const [syncPassword, setSyncPassword] = useState(DEFAULT_SYNC_PASSWORD);
-  const [quickShortcutIds, setQuickShortcutIds] = useState(['record:sleep', 'record:feed', 'record:diaper', 'custom:c1']);
-  const [customProjects, setCustomProjects] = useState<CustomProject[]>([
-    { id: 'c1', name: '辅食', icon: 'bowl-mix-outline', color: C.peach, soft: C.peachSoft, timeMode: 'instant' },
-    { id: 'c2', name: '洗澡', icon: 'bathtub-outline', color: C.blue, soft: C.blueSoft, timeMode: 'range' },
-  ]);
+  const [quickShortcutIds, setQuickShortcutIds] = useState(['record:sleep', 'record:feed', 'record:diaper', 'record:supplement']);
+  const [customProjects, setCustomProjects] = useState<CustomProject[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -525,7 +536,7 @@ export default function App() {
     loadUserPreferences(currentRole.id).then((preferences) => {
       if (!active) return;
       setElderMode(preferences?.elderMode ?? false);
-      setQuickShortcutIds(preferences?.quickShortcutIds ?? ['record:sleep', 'record:feed', 'record:diaper', 'custom:c1']);
+      setQuickShortcutIds(preferences?.quickShortcutIds ?? ['record:sleep', 'record:feed', 'record:diaper', 'record:supplement']);
       if (Platform.OS !== 'web') {
         setSyncEndpoint(preferences?.syncEndpoint ?? DEFAULT_SYNC_ENDPOINT);
         setSyncPassword(preferences?.syncPassword ?? DEFAULT_SYNC_PASSWORD);
@@ -571,6 +582,11 @@ export default function App() {
     setTimeout(() => setToast(''), 2200);
   };
 
+  const selectedItems = useMemo(
+    () => items.filter((item) => item.dateKey === selectedDateKey).sort((a, b) => a.time.localeCompare(b.time)),
+    [items, selectedDateKey],
+  );
+
   const handleSave = (item: TimelineItem) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setItems((current) => [item, ...current].sort((a, b) => a.time.localeCompare(b.time)));
@@ -580,7 +596,7 @@ export default function App() {
     }
     setAddOpen(false);
     setAddIntent(null);
-    showToast('记录已添加到今天');
+    showToast(selectedDateKey === localDateKey() ? '记录已添加到今天' : `记录已添加到${dateTitle(selectedDateKey)}`);
   };
 
   const stopRecord = (id: string, selectedEndTime = nowTime()) => {
@@ -626,8 +642,8 @@ export default function App() {
       <View style={styles.app}>
         {tab === 'today' && (
           <TodayScreen
-            selectedDay={selectedDay}
-            items={items}
+            selectedDateKey={selectedDateKey}
+            items={selectedItems}
             todos={todos}
             customProjects={customProjects}
             quickShortcutIds={quickShortcutIds}
@@ -650,14 +666,14 @@ export default function App() {
         )}
         {tab === 'calendar' && (
           <CalendarScreen
-            selectedDay={selectedDay}
-            onSelectDay={setSelectedDay}
-            items={selectedDay === '8' ? items : []}
+            selectedDateKey={selectedDateKey}
+            onSelectDate={setSelectedDateKey}
+            items={items}
             onOpenDay={() => setTab('today')}
             babyProfile={babyProfile}
           />
         )}
-        {tab === 'stats' && <StatsScreen />}
+        {tab === 'stats' && <StatsScreen items={items} babyProfile={babyProfile} />}
         {tab === 'settings' && (
           <SettingsScreen
             customProjects={customProjects}
@@ -676,6 +692,7 @@ export default function App() {
               await clearCurrentRole();
               setPreferencesReady(false);
               setCurrentRole(null);
+              setSelectedDateKey(localDateKey());
               setTab('today');
             }}
             quickShortcutIds={quickShortcutIds}
@@ -709,7 +726,10 @@ export default function App() {
             }}
           />
         )}
-        <BottomTabs active={tab} onChange={setTab} />
+        <BottomTabs active={tab} onChange={(nextTab) => {
+          if (nextTab === 'today') setSelectedDateKey(localDateKey());
+          setTab(nextTab);
+        }} />
         {toast ? (
           <View style={styles.toast}>
             <Icon name="check-circle" size={18} color="#FFFFFF" />
@@ -726,7 +746,8 @@ export default function App() {
         initialCustomName={addIntent?.customName}
         initialTimeMode={addIntent?.timeMode}
         customProjects={customProjects}
-        existingItems={items}
+        existingItems={selectedItems}
+        targetDateKey={selectedDateKey}
         onClose={() => {
           setAddOpen(false);
           setTodoDraft(null);
@@ -744,9 +765,8 @@ export default function App() {
           showToast('宝宝资料已更新');
         }}
       />
-      {Platform.OS !== 'web' && (
+      {Platform.OS !== 'web' && syncEndpointOpen && (
         <SyncEndpointSheet
-          visible={syncEndpointOpen}
           endpoint={syncEndpoint}
           password={syncPassword}
           onClose={() => setSyncEndpointOpen(false)}
@@ -803,6 +823,7 @@ export default function App() {
           setCustomProjects((current) => [...current, project]);
           setQuickShortcutIds((current) => [...current.filter((id) => id !== `custom:${project.id}`).slice(0, 3), `custom:${project.id}`]);
           setProjectOpen(false);
+          setSelectedDateKey(localDateKey());
           setTab('today');
           showToast(`“${project.name}”已创建并显示在主页`);
         }}
@@ -810,7 +831,7 @@ export default function App() {
       <RecordDetailSheet
         key={editingItem?.id ?? 'closed-record'}
         item={editingItem}
-        existingItems={items}
+        existingItems={editingItem ? items.filter((item) => item.dateKey === editingItem.dateKey) : []}
         onClose={() => setEditingItem(null)}
         onSave={(updated) => {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -831,7 +852,7 @@ export default function App() {
 }
 
 function TodayScreen({
-  selectedDay,
+  selectedDateKey,
   items,
   todos,
   customProjects,
@@ -843,7 +864,7 @@ function TodayScreen({
   onOpenCalendar,
   onOpenTodo,
 }: {
-  selectedDay: string;
+  selectedDateKey: string;
   items: TimelineItem[];
   todos: TodoItem[];
   customProjects: CustomProject[];
@@ -856,35 +877,35 @@ function TodayScreen({
   onOpenTodo: (todo: TodoItem) => void;
 }) {
   const elderMode = useElderMode();
-  const selectedDate = DAYS.find((day) => day.day === selectedDay);
+  const isToday = selectedDateKey === localDateKey();
   return (
     <View style={styles.screen}>
       <View style={[styles.todayContent, elderMode && styles.todayContentElder]}>
         <View style={styles.todayTopBar}>
           <View>
-            <Text style={styles.todayTitle}>{selectedDay === '8' ? '今天' : `8月${selectedDay}日`}</Text>
-            <Text style={styles.todaySubtitle}>2026年8月{selectedDay}日 · 星期{selectedDate?.week ?? ''}</Text>
+            <Text style={styles.todayTitle}>{isToday ? '今天' : dateTitle(selectedDateKey)}</Text>
+            <Text style={styles.todaySubtitle}>{fullDateTitle(selectedDateKey)} · 星期{chineseWeekday(selectedDateKey)}</Text>
           </View>
           <TouchableOpacity style={styles.calendarEntryButton} onPress={onOpenCalendar} activeOpacity={0.72}>
             <Icon name="calendar-month-outline" size={19} color={C.navy} />
             <Text style={styles.calendarEntryText}>日历</Text>
           </TouchableOpacity>
         </View>
-        {selectedDay === '8' ? (
+        {items.length || (isToday && todos.length) ? (
           <View style={styles.todayMain}>
-            <OngoingRecords items={items.filter((item) => item.ongoing)} onStop={onStopRecord} />
-            <TodayTodos todos={todos} onOpen={onOpenTodo} />
+            {isToday && <OngoingRecords items={items.filter((item) => item.ongoing)} onStop={onStopRecord} />}
+            {isToday && <TodayTodos todos={todos} onOpen={onOpenTodo} />}
             <View style={styles.calendarHeading}>
               <View style={styles.calendarTitleRow}>
-                <Text style={styles.calendarTitle}>今日时间表</Text>
+                <Text style={styles.calendarTitle}>{isToday ? '今日时间表' : `${dateTitle(selectedDateKey)}时间表`}</Text>
                 <View style={styles.recordCountBadge}><Text style={styles.recordCountText}>{items.length} 条</Text></View>
               </View>
               <Text style={styles.calendarHint}>线标记时刻 · 色块表示时间段</Text>
             </View>
-            <CalendarTimeline items={items} onEdit={onEdit} />
+            {items.length ? <CalendarTimeline items={items} onEdit={onEdit} /> : <EmptyDay day={dateTitle(selectedDateKey)} onAdd={onAdd} />}
           </View>
         ) : (
-          <EmptyDay day={selectedDay} onAdd={onAdd} />
+          <EmptyDay day={dateTitle(selectedDateKey)} onAdd={onAdd} />
         )}
       </View>
       <QuickAddBar
@@ -915,62 +936,6 @@ function Header({ babyProfile }: { babyProfile: BabyProfile }) {
   );
 }
 
-function DateStrip({ selectedDay, onSelect }: { selectedDay: string; onSelect: (day: string) => void }) {
-  return (
-    <View style={styles.dateStrip}>
-        {DAYS.map((item) => {
-          const active = selectedDay === item.day;
-          return (
-            <TouchableOpacity
-              key={item.day}
-              activeOpacity={0.78}
-              onPress={() => onSelect(item.day)}
-              style={[styles.dayItem, active && styles.dayItemActive]}
-            >
-              <Text style={[styles.weekText, active && styles.dayTextActive]}>{item.week}</Text>
-              <Text style={[styles.dayText, active && styles.dayTextActive]}>{item.day}</Text>
-              {active && <View style={styles.dayDot} />}
-            </TouchableOpacity>
-          );
-        })}
-    </View>
-  );
-}
-
-function DailySummary() {
-  return (
-    <View style={styles.summaryCard}>
-      <View style={styles.summaryTop}>
-        <View>
-          <Text style={styles.summaryEyebrow}>今日概览</Text>
-          <Text style={styles.summaryHeadline}>节奏很好</Text>
-        </View>
-        <View style={styles.scoreBadge}>
-          <Icon name="creation" size={14} color={C.sage} />
-          <Text style={styles.scoreText}>规律度 86%</Text>
-        </View>
-      </View>
-      <View style={styles.summaryMetrics}>
-        <Metric icon="weather-night" color={C.lavender} value="2h 00m" label="睡眠" />
-        <View style={styles.metricDivider} />
-        <Metric icon="baby-bottle-outline" color={C.blue} value="320 ml" label="奶量" />
-        <View style={styles.metricDivider} />
-        <Metric icon="baby-face-outline" color={C.amber} value="3 次" label="尿布" />
-      </View>
-    </View>
-  );
-}
-
-function Metric({ icon, color, value, label }: { icon: IconName; color: string; value: string; label: string }) {
-  return (
-    <View style={styles.metric}>
-      <Icon name={icon} size={17} color={color} />
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function TodayTodos({ todos, onOpen }: { todos: TodoItem[]; onOpen: (todo: TodoItem) => void }) {
   const elderMode = useElderMode();
   const [expanded, setExpanded] = useState(false);
@@ -978,17 +943,18 @@ function TodayTodos({ todos, onOpen }: { todos: TodoItem[]; onOpen: (todo: TodoI
   const pendingTodo = todos.find((todo) => !todo.done);
   const nextTodo = pendingTodo ?? todos[0];
   const visibleTodos = expanded ? todos : nextTodo ? [nextTodo] : [];
+  if (!todos.length) return null;
   return (
-    <View style={[styles.todoPanel, !expanded && styles.todoPanelCollapsed]}>
-      <TouchableOpacity style={styles.todoHeader} activeOpacity={0.72} onPress={() => setExpanded((current) => !current)}>
+    <View style={[styles.todoPanel, elderMode && styles.todoPanelElder, !expanded && styles.todoPanelCollapsed, elderMode && !expanded && styles.todoPanelCollapsedElder]}>
+      <TouchableOpacity style={[styles.todoHeader, elderMode && styles.todoHeaderElder]} activeOpacity={0.72} onPress={() => setExpanded((current) => !current)}>
         <View style={styles.todoTitleRow}>
-          <View style={styles.todoSpark}><Icon name="creation" size={15} color={C.peach} /></View>
+          <View style={[styles.todoSpark, elderMode && styles.todoSparkElder]}><Icon name="creation" size={elderMode ? 22 : 15} color={C.peach} /></View>
           <Text style={styles.todoTitle}>今日待办</Text>
           <Text style={styles.todoProgress}>{completed}/{todos.length}</Text>
         </View>
-        <View style={styles.todoCollapseMeta}>
+        <View style={[styles.todoCollapseMeta, elderMode && styles.todoCollapseMetaElder]}>
           <Text style={styles.todoSource}>{expanded ? '按最近 7 天规律生成' : pendingTodo ? `下一项 ${pendingTodo.time}` : '今日已完成'}</Text>
-          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.muted} />
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={elderMode ? 22 : 16} color={C.muted} />
         </View>
       </TouchableOpacity>
       <View style={styles.todoRows}>
@@ -996,16 +962,19 @@ function TodayTodos({ todos, onOpen }: { todos: TodoItem[]; onOpen: (todo: TodoI
           const type = typeFor(todo.kind);
           return (
             <TouchableOpacity key={todo.id} style={[styles.todoRow, elderMode && styles.todoRowElder]} activeOpacity={0.72} onPress={() => onOpen(todo)} disabled={todo.done}>
-              <View style={[styles.todoCheck, todo.done && { backgroundColor: type.color, borderColor: type.color }]}>
-                {todo.done && <Icon name="check" size={12} color="#FFFFFF" />}
+              <View style={[styles.todoLeading, elderMode && styles.todoLeadingElder]}>
+                <View style={[styles.todoCheck, elderMode && styles.todoCheckElder, todo.done && { backgroundColor: type.color, borderColor: type.color }]}>
+                  {todo.done && <Icon name="check" size={elderMode ? 17 : 12} color="#FFFFFF" />}
+                </View>
+                <View style={[styles.todoTypeDot, elderMode && styles.todoTypeDotElder, { backgroundColor: type.soft }]}><Icon name={type.icon} size={elderMode ? 22 : 14} color={type.color} /></View>
               </View>
-              <View style={[styles.todoTypeDot, { backgroundColor: type.soft }]}><Icon name={type.icon} size={14} color={type.color} /></View>
-              <Text style={styles.todoTime}>{todo.time}</Text>
-              <View style={styles.todoCopy}>
-                <Text numberOfLines={1} style={styles.todoName}>{todo.title}</Text>
-                <Text numberOfLines={1} style={styles.todoReason}>{todo.reason}</Text>
+              {!elderMode && <Text style={styles.todoTime}>{todo.time}</Text>}
+              <View style={[styles.todoCopy, elderMode && styles.todoCopyElder]}>
+                {elderMode && <Text style={styles.todoTimeElder}>{todo.time}</Text>}
+                <Text numberOfLines={elderMode ? undefined : 1} style={[styles.todoName, todo.done && styles.todoTextDone]}>{todo.title}</Text>
+                <Text numberOfLines={elderMode ? undefined : 1} style={styles.todoReason}>{todo.reason}</Text>
               </View>
-              {!todo.done && <Icon name="chevron-right" size={15} color="#A8AFB7" />}
+              {!todo.done && <Icon name="chevron-right" size={elderMode ? 24 : 15} color="#A8AFB7" />}
             </TouchableOpacity>
           );
         })}
@@ -1080,7 +1049,7 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
   const [clock, setClock] = useState(nowTime());
   const scrollRef = React.useRef<ScrollView>(null);
   const span = CALENDAR_END_MINUTE - CALENDAR_START_MINUTE;
-  const hourHeight = elderMode ? 76 : CALENDAR_HOUR_HEIGHT;
+  const hourHeight = elderMode ? 96 : CALENDAR_HOUR_HEIGHT;
   const scrollHeight = (CALENDAR_HOURS.length - 1) * hourHeight;
   const visibleItems = items.filter((item) => {
     const minute = minuteOfDay(item.time);
@@ -1108,7 +1077,7 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
         <View style={[styles.calendarScrollable, { height: scrollHeight }]}>
           <View style={[styles.calendarAxis, elderMode && styles.calendarAxisElder]}>
             {CALENDAR_HOURS.map((hour, index) => (
-              <Text key={hour} style={[styles.calendarHour, { top: `${(index / (CALENDAR_HOURS.length - 1)) * 100}%` }]}>{String(hour).padStart(2, '0')}:00</Text>
+              <Text key={hour} style={[styles.calendarHour, elderMode && styles.calendarHourElder, { top: `${(index / (CALENDAR_HOURS.length - 1)) * 100}%` }]}>{String(hour).padStart(2, '0')}:00</Text>
             ))}
           </View>
           <View style={styles.calendarCanvas}>
@@ -1136,20 +1105,30 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
                   <Pressable
                     key={item.id}
                     onPress={() => onEdit(item)}
-                    style={({ pressed }) => [styles.calendarInstantEvent, instantOverlapsRange && styles.calendarInstantEventBent, { top: `${top}%` }, pressed && styles.calendarEventPressed]}
+                    style={({ pressed }) => [
+                      styles.calendarInstantEvent,
+                      elderMode && styles.calendarInstantEventElder,
+                      instantOverlapsRange && styles.calendarInstantEventBent,
+                      elderMode && instantOverlapsRange && styles.calendarInstantEventBentElder,
+                      { top: `${top}%` },
+                      pressed && styles.calendarEventPressed,
+                    ]}
                   >
-                    <View style={[styles.calendarInstantMarker, { backgroundColor: type.color }]} />
+                    <View style={[styles.calendarInstantMarker, elderMode && styles.calendarInstantMarkerElder, { backgroundColor: type.color }]} />
                     {instantOverlapsRange ? (
-                      <View style={styles.calendarBentConnector}>
+                      <View style={[styles.calendarBentConnector, elderMode && styles.calendarBentConnectorElder]}>
                         <View style={[styles.calendarBendTop, { backgroundColor: `${type.color}88` }]} />
                         <View style={[styles.calendarBendVertical, { backgroundColor: `${type.color}88` }]} />
                         <View style={[styles.calendarBendBottom, { backgroundColor: `${type.color}88` }]} />
                       </View>
                     ) : <View style={[styles.calendarInstantRule, { backgroundColor: `${type.color}66` }]} />}
-                    <View style={[styles.calendarInstantTag, instantOverlapsRange && styles.calendarInstantTagBent, { backgroundColor: type.soft, borderColor: `${type.color}36` }]}>
-                      <View style={[styles.calendarInstantIcon, { backgroundColor: C.paper }]}><Icon name={type.icon} size={14} color={type.color} /></View>
-                      <Text numberOfLines={1} style={[styles.calendarInstantTitle, { color: type.color }]}>{item.title}</Text>
-                      <Text style={[styles.calendarInstantTime, { color: type.color }]}>{item.time}</Text>
+                    <View style={[styles.calendarInstantTag, elderMode && styles.calendarInstantTagElder, instantOverlapsRange && styles.calendarInstantTagBent, elderMode && instantOverlapsRange && styles.calendarInstantTagBentElder, { backgroundColor: type.soft, borderColor: `${type.color}36` }]}>
+                      <View style={[styles.calendarInstantIcon, elderMode && styles.calendarInstantIconElder, { backgroundColor: C.paper }]}><Icon name={type.icon} size={elderMode ? 20 : 14} color={type.color} /></View>
+                      <View style={styles.calendarInstantCopy}>
+                        <Text numberOfLines={1} style={[styles.calendarInstantTitle, { color: type.color }]}>{item.title}</Text>
+                        {elderMode && <Text style={[styles.calendarInstantTime, styles.calendarInstantTimeElder, { color: type.color }]}>{item.time}</Text>}
+                      </View>
+                      {!elderMode && <Text style={[styles.calendarInstantTime, { color: type.color }]}>{item.time}</Text>}
                     </View>
                   </Pressable>
                 );
@@ -1165,11 +1144,21 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
                     pressed && styles.calendarEventPressed,
                   ]}
                 >
-                  <View style={styles.calendarEventTop}>
-                    <Icon name={type.icon} size={14} color={type.color} />
-                    <Text numberOfLines={1} style={[styles.calendarEventTitle, { color: type.color }]}>{item.title}</Text>
-                    {item.ongoing && <View style={[styles.calendarLiveDot, { backgroundColor: type.color }]} />}
-                    <Text style={[styles.calendarEventTime, { color: type.color }]}>{item.ongoing ? '进行中' : `${item.time}${item.endTime ? `–${item.endTime}` : ''}`}</Text>
+                  <View style={[styles.calendarEventTop, elderMode && styles.calendarEventTopElder]}>
+                    <Icon name={type.icon} size={elderMode ? 20 : 14} color={type.color} />
+                    {elderMode ? (
+                      <View style={styles.calendarEventCopyElder}>
+                        <Text numberOfLines={1} style={[styles.calendarEventTitle, { color: type.color }]}>{item.title}</Text>
+                        <Text style={[styles.calendarEventTime, styles.calendarEventTimeElder, { color: type.color }]}>{item.ongoing ? '进行中' : `${item.time}${item.endTime ? `–${item.endTime}` : ''}`}</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Text numberOfLines={1} style={[styles.calendarEventTitle, { color: type.color }]}>{item.title}</Text>
+                        {item.ongoing && <View style={[styles.calendarLiveDot, { backgroundColor: type.color }]} />}
+                        <Text style={[styles.calendarEventTime, { color: type.color }]}>{item.ongoing ? '进行中' : `${item.time}${item.endTime ? `–${item.endTime}` : ''}`}</Text>
+                      </>
+                    )}
+                    {elderMode && item.ongoing && <View style={[styles.calendarLiveDot, styles.calendarLiveDotElder, { backgroundColor: type.color }]} />}
                   </View>
                 </Pressable>
               );
@@ -1233,7 +1222,7 @@ function EmptyDay({ day, onAdd }: { day: string; onAdd: () => void }) {
       <View style={styles.emptyIllustration}>
         <Icon name="calendar-blank-outline" size={34} color={C.lavender} />
       </View>
-      <Text style={styles.emptyTitle}>8月{day}日还没有记录</Text>
+      <Text style={styles.emptyTitle}>{day}还没有记录</Text>
       <Text style={styles.emptyText}>从一瓶奶、一次小睡，或任何值得记下的瞬间开始。</Text>
       <TouchableOpacity style={styles.primaryButton} onPress={onAdd}>
         <Icon name="plus" size={19} color="#FFFFFF" />
@@ -1263,17 +1252,35 @@ function QuickAddBar({ shortcuts, onAdd, onQuickAdd }: { shortcuts: QuickShortcu
 }
 
 const MONTH_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-const AUGUST_2026_CELLS: Array<number | null> = [null, null, null, null, null, ...Array.from({ length: 31 }, (_, index) => index + 1)];
-const DAYS_WITH_RECORDS: Record<number, RecordKind[]> = {
-  3: ['sleep', 'feed'], 4: ['sleep'], 5: ['feed', 'activity'], 6: ['sleep', 'feed'], 7: ['feed', 'supplement'], 8: ['sleep', 'feed', 'diaper'],
-};
 
-function CalendarScreen({ selectedDay, onSelectDay, items, onOpenDay, babyProfile }: { selectedDay: string; onSelectDay: (day: string) => void; items: TimelineItem[]; onOpenDay: () => void; babyProfile: BabyProfile }) {
-  const selectedNumber = Number(selectedDay);
-  const selectedWeek = DAYS.find((day) => day.day === selectedDay)?.week ?? '六';
-  const sleepCount = items.filter((item) => item.kind === 'sleep').length;
-  const feedCount = items.filter((item) => item.kind === 'feed').length;
-  const diaperCount = items.filter((item) => item.kind === 'diaper').length;
+function calendarMonthCells(month: Date): Array<number | null> {
+  const firstWeekday = (new Date(month.getFullYear(), month.getMonth(), 1, 12).getDay() + 6) % 7;
+  const days = new Date(month.getFullYear(), month.getMonth() + 1, 0, 12).getDate();
+  return [...Array.from({ length: firstWeekday }, () => null), ...Array.from({ length: days }, (_, index) => index + 1)];
+}
+
+function CalendarScreen({ selectedDateKey, onSelectDate, items, onOpenDay, babyProfile }: { selectedDateKey: string; onSelectDate: (dateKey: string) => void; items: TimelineItem[]; onOpenDay: () => void; babyProfile: BabyProfile }) {
+  const selectedDate = dateFromKey(selectedDateKey);
+  const [month, setMonth] = useState(() => new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1, 12));
+  const cells = useMemo(() => calendarMonthCells(month), [month]);
+  const selectedItems = useMemo(() => items.filter((item) => item.dateKey === selectedDateKey), [items, selectedDateKey]);
+  const kindsByDate = useMemo(() => {
+    const result = new Map<string, RecordKind[]>();
+    items.forEach((item) => {
+      const current = result.get(item.dateKey) ?? [];
+      if (!current.includes(item.kind)) result.set(item.dateKey, [...current, item.kind]);
+    });
+    return result;
+  }, [items]);
+  const sleepCount = selectedItems.filter((item) => item.kind === 'sleep').length;
+  const feedCount = selectedItems.filter((item) => item.kind === 'feed').length;
+  const diaperCount = selectedItems.filter((item) => item.kind === 'diaper').length;
+
+  useEffect(() => {
+    setMonth((current) => current.getFullYear() === selectedDate.getFullYear() && current.getMonth() === selectedDate.getMonth()
+      ? current
+      : new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1, 12));
+  }, [selectedDateKey]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.calendarPageContent} showsVerticalScrollIndicator={false}>
@@ -1284,9 +1291,9 @@ function CalendarScreen({ selectedDay, onSelectDay, items, onOpenDay, babyProfil
           <Text style={styles.pageSubtitle}>回顾每天的节奏与记录</Text>
         </View>
         <View style={styles.monthNavigator}>
-          <TouchableOpacity style={styles.monthNavButton}><Icon name="chevron-left" size={19} color={C.muted} /></TouchableOpacity>
-          <Text style={styles.monthNavigatorText}>2026年8月</Text>
-          <TouchableOpacity style={styles.monthNavButton}><Icon name="chevron-right" size={19} color={C.muted} /></TouchableOpacity>
+          <TouchableOpacity style={styles.monthNavButton} onPress={() => setMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1, 12))}><Icon name="chevron-left" size={19} color={C.muted} /></TouchableOpacity>
+          <Text style={styles.monthNavigatorText}>{month.getFullYear()}年{month.getMonth() + 1}月</Text>
+          <TouchableOpacity style={styles.monthNavButton} onPress={() => setMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1, 12))}><Icon name="chevron-right" size={19} color={C.muted} /></TouchableOpacity>
         </View>
       </View>
       <View style={styles.monthCard}>
@@ -1294,10 +1301,11 @@ function CalendarScreen({ selectedDay, onSelectDay, items, onOpenDay, babyProfil
           {MONTH_WEEKDAYS.map((day) => <Text key={day} style={styles.monthWeekText}>{day}</Text>)}
         </View>
         <View style={styles.monthGrid}>
-          {AUGUST_2026_CELLS.map((day, index) => {
-            const active = day === selectedNumber;
-            const kinds = day ? DAYS_WITH_RECORDS[day] ?? [] : [];
-            const isToday = day === 8;
+          {cells.map((day, index) => {
+            const cellDateKey = day ? localDateKey(new Date(month.getFullYear(), month.getMonth(), day, 12)) : '';
+            const active = cellDateKey === selectedDateKey;
+            const kinds = day ? kindsByDate.get(cellDateKey) ?? [] : [];
+            const isToday = cellDateKey === localDateKey();
             return (
               <TouchableOpacity
                 key={`${day ?? 'blank'}-${index}`}
@@ -1306,7 +1314,7 @@ function CalendarScreen({ selectedDay, onSelectDay, items, onOpenDay, babyProfil
                 activeOpacity={0.7}
                 onPress={() => {
                   if (!day) return;
-                  onSelectDay(String(day));
+                  onSelectDate(cellDateKey);
                   onOpenDay();
                 }}
               >
@@ -1332,27 +1340,18 @@ function CalendarScreen({ selectedDay, onSelectDay, items, onOpenDay, babyProfil
 
       <View style={styles.selectedDayHeading}>
         <View>
-          <Text style={styles.selectedDayTitle}>8月{selectedDay}日 · 星期{selectedWeek}</Text>
-          <Text style={styles.selectedDaySubtitle}>{items.length ? `共 ${items.length} 条记录` : '这一天还没有记录'}</Text>
+          <Text style={styles.selectedDayTitle}>{dateTitle(selectedDateKey)} · 星期{chineseWeekday(selectedDateKey)}</Text>
+          <Text style={styles.selectedDaySubtitle}>{selectedItems.length ? `共 ${selectedItems.length} 条记录` : '这一天还没有记录'}</Text>
         </View>
-        {selectedDay === '8' && <View style={styles.todayBadge}><Text style={styles.todayBadgeText}>今天</Text></View>}
+        {selectedDateKey === localDateKey() && <View style={styles.todayBadge}><Text style={styles.todayBadgeText}>今天</Text></View>}
       </View>
 
-      {items.length ? (
+      {selectedItems.length ? (
         <View style={styles.calendarSummaryCard}>
           <View style={styles.calendarMetricsRow}>
             <CalendarMetric icon="weather-night" color={C.lavender} soft={C.lavenderSoft} value={`${sleepCount} 段`} label="睡眠" />
             <CalendarMetric icon="baby-bottle-outline" color={C.blue} soft={C.blueSoft} value={`${feedCount} 次`} label="喂养" />
             <CalendarMetric icon="baby-face-outline" color={C.amber} soft={C.amberSoft} value={`${diaperCount} 次`} label="尿布" />
-          </View>
-          <View style={styles.calendarSummaryDivider} />
-          <View style={styles.dayRhythmRow}>
-            <Icon name="chart-timeline-variant-shimmer" size={20} color={C.sage} />
-            <View style={styles.dayRhythmCopy}>
-              <Text style={styles.dayRhythmTitle}>今天的节奏较规律</Text>
-              <Text style={styles.dayRhythmText}>喂养间隔与最近 7 天的中位数接近</Text>
-            </View>
-            <View style={styles.rhythmScore}><Text style={styles.rhythmScoreText}>86%</Text></View>
           </View>
         </View>
       ) : (
@@ -1378,16 +1377,35 @@ function CalendarMetric({ icon, color, soft, value, label }: { icon: IconName; c
   );
 }
 
-function StatsScreen() {
+function StatsScreen({ items, babyProfile }: { items: TimelineItem[]; babyProfile: BabyProfile }) {
   const [metric, setMetric] = useState<'sleep' | 'feed'>('sleep');
-  const sleep = [6.9, 8.2, 7.5, 8.8, 7.2, 8.5, 7.9];
-  const feed = [680, 720, 650, 760, 700, 740, 690];
+  const dayKeys = useMemo(() => Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+    return localDateKey(date);
+  }), []);
+  const recentItems = useMemo(() => items.filter((item) => dayKeys.includes(item.dateKey)), [items, dayKeys]);
+  const sleep = dayKeys.map((dateKey) => recentItems
+    .filter((item) => item.dateKey === dateKey && item.kind === 'sleep')
+    .reduce((total, item) => total + durationBetween(item.time, item.endTime ?? (item.ongoing && dateKey === localDateKey() ? nowTime() : item.time)) / 60, 0));
+  const feed = dayKeys.map((dateKey) => recentItems
+    .filter((item) => item.dateKey === dateKey && item.kind === 'feed')
+    .reduce((total, item) => total + Number(item.detail.match(/(\d+)\s*ml/i)?.[1] ?? 0), 0));
   const values = metric === 'sleep' ? sleep : feed;
-  const max = Math.max(...values);
+  const max = Math.max(1, ...values);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const average = total / 7;
+  const hasData = values.some((value) => value > 0);
+  const sleepCount = recentItems.filter((item) => item.kind === 'sleep').length;
+  const feedCount = recentItems.filter((item) => item.kind === 'feed').length;
+  const supplementCount = recentItems.filter((item) => item.kind === 'supplement').length;
+  const averageLabel = metric === 'sleep'
+    ? `${Math.floor(average)} 小时 ${Math.round((average % 1) * 60)} 分`
+    : `${Math.round(average)} ml`;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
-      <PageHeader title="成长趋势" subtitle="看见小满每天的小变化" icon="calendar-month-outline" />
+      <PageHeader title="成长趋势" subtitle={`${babyProfile.name || '宝宝'}最近 7 天的真实记录`} icon="calendar-month-outline" />
       <View style={styles.segmented}>
         <Segment label="睡眠" active={metric === 'sleep'} onPress={() => setMetric('sleep')} />
         <Segment label="喂养" active={metric === 'feed'} onPress={() => setMetric('feed')} />
@@ -1396,28 +1414,32 @@ function StatsScreen() {
         <View style={styles.chartHeader}>
           <View>
             <Text style={styles.chartLabel}>过去 7 天平均</Text>
-            <Text style={styles.chartValue}>{metric === 'sleep' ? '7 小时 51 分' : '706 ml'}</Text>
-          </View>
-          <View style={styles.trendBadge}>
-            <Icon name="trending-up" size={16} color={C.sage} />
-            <Text style={styles.trendText}>较上周 +6%</Text>
+            <Text style={styles.chartValue}>{averageLabel}</Text>
           </View>
         </View>
-        <View style={styles.chart}>
-          {values.map((value, index) => (
-            <View key={index} style={styles.barColumn}>
-              <View style={styles.barTrack}>
-                <View style={[styles.bar, { height: `${Math.max(18, (value / max) * 100)}%`, backgroundColor: metric === 'sleep' ? C.lavender : C.blue }]} />
+        {hasData ? (
+          <View style={styles.chart}>
+            {values.map((value, index) => (
+              <View key={dayKeys[index]} style={styles.barColumn}>
+                <View style={styles.barTrack}>
+                  <View style={[styles.bar, { height: `${(value / max) * 100}%`, backgroundColor: metric === 'sleep' ? C.lavender : C.blue }]} />
+                </View>
+                <Text style={styles.barLabel}>{chineseWeekday(dayKeys[index] ?? localDateKey())}</Text>
               </View>
-              <Text style={styles.barLabel}>{['一', '二', '三', '四', '五', '六', '日'][index]}</Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.statsEmpty}>
+            <Icon name="chart-box-outline" size={30} color={C.muted} />
+            <Text style={styles.statsEmptyTitle}>最近 7 天暂无{metric === 'sleep' ? '睡眠' : '奶量'}数据</Text>
+            <Text style={styles.statsEmptyText}>添加记录后，这里会自动生成真实趋势。</Text>
+          </View>
+        )}
       </View>
-      <Text style={styles.listHeading}>本周洞察</Text>
-      <InsightCard icon="weather-sunset-up" color={C.lavender} soft={C.lavenderSoft} title="入睡时间更稳定了" text="近 4 天晚间入睡时间都在 20:30 前后，波动比上周减少 18 分钟。" />
-      <InsightCard icon="baby-bottle-outline" color={C.blue} soft={C.blueSoft} title="奶量保持平稳" text="每日平均 706 ml，和过去 30 天的节奏基本一致。" />
-      <InsightCard icon="check-decagram-outline" color={C.sage} soft={C.sageSoft} title="补充剂完成得很好" text="维生素 D 本周已完成 6 / 7 次，今天也别忘了。" />
+      <Text style={styles.listHeading}>本周记录</Text>
+      <InsightCard icon="weather-night" color={C.lavender} soft={C.lavenderSoft} title={`${sleepCount} 段睡眠`} text="仅统计最近 7 天已保存的睡眠记录。" />
+      <InsightCard icon="baby-bottle-outline" color={C.blue} soft={C.blueSoft} title={`${feedCount} 次喂养`} text="奶量趋势仅统计填写了毫升数的记录。" />
+      <InsightCard icon="pill" color={C.sage} soft={C.sageSoft} title={`${supplementCount} 次营养补充`} text="数据来自铁剂、维生素 D 和维生素 AD 记录。" />
       <View style={{ height: 112 }} />
     </ScrollView>
   );
@@ -1697,7 +1719,7 @@ function BottomTabs({ active, onChange }: { active: TabKey; onChange: (key: TabK
   );
 }
 
-function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initialTimeMode, customProjects, existingItems, onClose, onSave }: { visible: boolean; preset?: TodoItem | null; initialKind?: RecordKind; initialCustomName?: string; initialTimeMode?: TimeMode; customProjects: CustomProject[]; existingItems: TimelineItem[]; onClose: () => void; onSave: (item: TimelineItem) => void }) {
+function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initialTimeMode, customProjects, existingItems, targetDateKey, onClose, onSave }: { visible: boolean; preset?: TodoItem | null; initialKind?: RecordKind; initialCustomName?: string; initialTimeMode?: TimeMode; customProjects: CustomProject[]; existingItems: TimelineItem[]; targetDateKey: string; onClose: () => void; onSave: (item: TimelineItem) => void }) {
   const startingKind = preset?.kind ?? initialKind ?? null;
   const startingChoice = preset?.kind === 'supplement'
     ? preset.title.includes('铁') ? '铁剂' : preset.title.includes('AD') ? '维生素 AD' : '维生素 D'
@@ -1761,6 +1783,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
     const definition = definitions[selected];
     const candidate: TimelineItem = {
       id: String(Date.now()),
+      dateKey: targetDateKey,
       kind: selected,
       timeMode: recordTimeMode,
       time,
@@ -1816,7 +1839,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
             ) : <View style={styles.sheetHeaderButton} />}
             <View style={styles.sheetTitleWrap}>
               <Text style={styles.sheetTitle}>{preset ? `完成：${preset.title}` : selected ? `记录${initialCustomName || typeFor(selected).label}` : '添加记录'}</Text>
-              <Text style={styles.sheetSubtitle}>{preset ? `建议时间 ${preset.time} · 可以修改` : selected ? '今天 · 8月8日' : '刚刚发生了什么？'}</Text>
+              <Text style={styles.sheetSubtitle}>{preset ? `建议时间 ${preset.time} · 可以修改` : selected ? `${targetDateKey === localDateKey() ? '今天' : dateTitle(targetDateKey)} · 星期${chineseWeekday(targetDateKey)}` : '刚刚发生了什么？'}</Text>
             </View>
             <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} color={C.ink} /></TouchableOpacity>
           </View>
@@ -1862,7 +1885,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
               setRangeHasEnd={setRangeHasEnd}
               customTimeMode={customTimeMode}
               setCustomTimeMode={setCustomTimeMode}
-              conflict={selected && timeModeFor(selected, customTimeMode) === 'range' ? findRangeConflict({ id: 'draft', kind: selected, timeMode: 'range', time, endTime: rangeHasEnd ? endTime : nowTime(), title: '', detail: '' }, existingItems) : undefined}
+              conflict={selected && timeModeFor(selected, customTimeMode) === 'range' ? findRangeConflict({ id: 'draft', dateKey: targetDateKey, kind: selected, timeMode: 'range', time, endTime: rangeHasEnd ? endTime : nowTime(), title: '', detail: '' }, existingItems) : undefined}
               amount={amount}
               setAmount={setAmount}
               note={note}
@@ -2163,9 +2186,9 @@ function DateWheelColumn({ values, selected, suffix, onChange }: { values: numbe
 function BirthDatePickerField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const initial = value.split('-').map(Number);
   const [open, setOpen] = useState(false);
-  const [year, setYear] = useState(initial[0] ?? new Date().getFullYear());
-  const [month, setMonth] = useState(initial[1] ?? 1);
-  const [day, setDay] = useState(initial[2] ?? 1);
+  const [year, setYear] = useState(initial[0] || new Date().getFullYear());
+  const [month, setMonth] = useState(initial[1] || new Date().getMonth() + 1);
+  const [day, setDay] = useState(initial[2] || new Date().getDate());
   const months = Array.from({ length: 12 }, (_, index) => index + 1);
   const daysInMonth = new Date(year, month, 0).getDate();
   const days = Array.from({ length: daysInMonth }, (_, index) => index + 1);
@@ -2250,18 +2273,15 @@ function BabyProfileSheet({ visible, profile, onClose, onSave }: { visible: bool
   );
 }
 
-function SyncEndpointSheet({ visible, endpoint, password, onClose, onSave }: { visible: boolean; endpoint: string; password: string; onClose: () => void; onSave: (endpoint: string, password: string) => void }) {
+function SyncEndpointSheet({ endpoint, password, onClose, onSave }: { endpoint: string; password: string; onClose: () => void; onSave: (endpoint: string, password: string) => void }) {
   const [draft, setDraft] = useState(endpoint);
   const [draftPassword, setDraftPassword] = useState(password);
   const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    if (visible) {
-      setDraft(endpoint);
-      setDraftPassword(password);
-      setShowPassword(false);
-    }
-  }, [visible, endpoint, password]);
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
 
   const save = () => {
     if (!draft.trim().startsWith('https://')) {
@@ -2272,29 +2292,30 @@ function SyncEndpointSheet({ visible, endpoint, password, onClose, onSave }: { v
       Alert.alert('请输入同步密码', '同步密码仅保存在当前 Android 设备中，不会写入项目源码。');
       return;
     }
+    Keyboard.dismiss();
     onSave(draft, draftPassword.trim());
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={[styles.sheet, styles.syncSheet]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderButton} />
             <View style={styles.sheetTitleWrap}><Text style={styles.sheetTitle}>同步接口设置</Text><Text style={styles.sheetSubtitle}>仅用于 Android 客户端</Text></View>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={onClose}><Icon name="close" size={21} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} /></TouchableOpacity>
           </View>
           <View style={styles.profileForm}>
             <View style={[styles.projectPreview, { backgroundColor: C.sageSoft }]}><Icon name="api" size={31} color={C.sage} /></View>
             <Field label="HTTPS 接口地址">
-              <TextInput style={[styles.input, styles.endpointInput]} value={draft} onChangeText={setDraft} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
+              <TextInput style={[styles.input, styles.endpointInput]} value={draft} onChangeText={setDraft} autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
               <Text style={styles.endpointHint}>Docker Compose 后端将通过此地址提供登录、记录和增量同步接口。</Text>
             </Field>
             <Field label="同步密码">
               <View style={styles.passwordInputWrap}>
-                <TextInput style={styles.passwordInput} value={draftPassword} onChangeText={setDraftPassword} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} placeholder="输入服务器同步密码" placeholderTextColor="#A6ADB6" />
+                <TextInput style={styles.passwordInput} value={draftPassword} onChangeText={setDraftPassword} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} placeholder="输入服务器同步密码" placeholderTextColor="#A6ADB6" returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
                 <TouchableOpacity style={styles.passwordEyeButton} onPress={() => setShowPassword((current) => !current)}><Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={C.muted} /></TouchableOpacity>
               </View>
               <Text style={styles.endpointHint}>密码只保存在本机；服务器正确密码由 Docker Compose 环境变量提供。</Text>
@@ -2304,7 +2325,7 @@ function SyncEndpointSheet({ visible, endpoint, password, onClose, onSave }: { v
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -2690,21 +2711,32 @@ const styles = StyleSheet.create({
   dayTextActive: { color: '#FFFFFF' },
   dayDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: C.peach, marginTop: 4 },
   todoPanel: { backgroundColor: C.paper, borderRadius: 15, paddingHorizontal: 11, paddingTop: 8, paddingBottom: 5, marginTop: 7, borderWidth: 1, borderColor: '#E9E9E6' },
+  todoPanelElder: { borderRadius: 20, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 },
   todoPanelCollapsed: { paddingBottom: 4 },
+  todoPanelCollapsedElder: { paddingBottom: 12 },
   todoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  todoHeaderElder: { flexDirection: 'column', alignItems: 'stretch', gap: 8, marginBottom: 8 },
   todoTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   todoCollapseMeta: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  todoCollapseMetaElder: { alignSelf: 'stretch', justifyContent: 'space-between', gap: 8 },
   todoSpark: { width: 25, height: 25, borderRadius: 9, backgroundColor: C.peachSoft, alignItems: 'center', justifyContent: 'center' },
+  todoSparkElder: { width: 38, height: 38, borderRadius: 13 },
   todoTitle: { color: C.ink, fontSize: 16, fontWeight: '800' },
   todoProgress: { color: C.muted, backgroundColor: '#F0F1EF', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3, fontSize: 11, fontWeight: '700' },
   todoSource: { color: '#8D949D', fontSize: 11 },
   todoRows: { gap: 1 },
   todoRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
-  todoRowElder: { minHeight: 58 },
+  todoRowElder: { minHeight: 116, alignItems: 'flex-start', paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#EEEFEA' },
+  todoLeading: { flexDirection: 'row', alignItems: 'center' },
+  todoLeadingElder: { paddingTop: 4 },
   todoCheck: { width: 17, height: 17, borderRadius: 6, borderWidth: 1.5, borderColor: '#C9CDD1', alignItems: 'center', justifyContent: 'center', marginRight: 7 },
+  todoCheckElder: { width: 25, height: 25, borderRadius: 8, marginRight: 9 },
   todoTypeDot: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 7 },
+  todoTypeDotElder: { width: 38, height: 38, borderRadius: 12, marginRight: 12 },
   todoTime: { color: C.ink, fontSize: 13, fontWeight: '800', width: 46 },
   todoCopy: { flex: 1, flexDirection: 'column', justifyContent: 'center' },
+  todoCopyElder: { justifyContent: 'flex-start', minWidth: 0, paddingRight: 6 },
+  todoTimeElder: { color: C.peach, fontSize: 16, fontWeight: '800', marginBottom: 5 },
   todoName: { color: C.ink, fontSize: 14, fontWeight: '700' },
   todoReason: { color: C.muted, fontSize: 11, marginTop: 2 },
   todoTextDone: { textDecorationLine: 'line-through', color: '#A9AFB6' },
@@ -2719,30 +2751,44 @@ const styles = StyleSheet.create({
   calendarScrollContent: { paddingVertical: 8 },
   calendarScrollable: { flexDirection: 'row' },
   calendarAxis: { width: 50, backgroundColor: '#F2F2EF', position: 'relative' },
-  calendarAxisElder: { width: 64 },
+  calendarAxisElder: { width: 78 },
   calendarHour: { position: 'absolute', right: 7, color: '#7E8792', fontSize: 10, fontWeight: '600', transform: [{ translateY: -6 }] },
+  calendarHourElder: { right: 10, transform: [{ translateY: -10 }] },
   calendarCanvas: { flex: 1, position: 'relative' },
   calendarLine: { position: 'absolute', left: 0, right: 0, height: StyleSheet.hairlineWidth, backgroundColor: '#E5E6E4' },
   calendarEvent: { position: 'absolute', left: 6, right: 7, minHeight: 30, borderLeftWidth: 4, borderRadius: 8, paddingHorizontal: 8, justifyContent: 'center', zIndex: 2, overflow: 'hidden' },
-  calendarEventElder: { minHeight: 42, paddingHorizontal: 10 },
+  calendarEventElder: { minHeight: 64, paddingHorizontal: 11, borderLeftWidth: 5 },
   calendarEventPressed: { opacity: 0.72, transform: [{ scale: 0.99 }] },
   calendarEventTop: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 24 },
+  calendarEventTopElder: { alignItems: 'flex-start', minHeight: 56, paddingVertical: 6, gap: 9 },
+  calendarEventCopyElder: { flex: 1, minWidth: 0 },
   calendarEventTitle: { fontSize: 13, fontWeight: '800', flexShrink: 1 },
   calendarEventTime: { fontSize: 10, fontWeight: '700', marginLeft: 'auto' },
+  calendarEventTimeElder: { marginLeft: 0, marginTop: 3 },
   calendarLiveDot: { width: 5, height: 5, borderRadius: 3, marginLeft: 'auto' },
+  calendarLiveDotElder: { width: 9, height: 9, borderRadius: 5, marginTop: 8 },
   calendarInstantEvent: { position: 'absolute', left: 7, right: 7, height: 36, zIndex: 3, flexDirection: 'row', alignItems: 'center', transform: [{ translateY: -18 }] },
+  calendarInstantEventElder: { height: 54, transform: [{ translateY: -27 }] },
   calendarInstantEventBent: { height: 62, transform: [{ translateY: -31 }] },
+  calendarInstantEventBentElder: { height: 86, transform: [{ translateY: -43 }] },
   calendarInstantMarker: { width: 3, height: 28, borderRadius: 2 },
+  calendarInstantMarkerElder: { width: 5, height: 44, borderRadius: 3 },
   calendarInstantRule: { flex: 1, height: 1, marginLeft: 4 },
   calendarBentConnector: { flex: 1, height: 62, marginLeft: 4, position: 'relative' },
+  calendarBentConnectorElder: { height: 86 },
   calendarBendTop: { position: 'absolute', left: 0, right: '35%', top: 30, height: 1 },
   calendarBendVertical: { position: 'absolute', right: '35%', top: 30, width: 1, height: 14 },
   calendarBendBottom: { position: 'absolute', left: '65%', right: 0, top: 43, height: 1 },
   calendarInstantTag: { width: '58%', minWidth: 142, height: 34, borderRadius: 10, borderWidth: 1, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  calendarInstantTagElder: { width: '72%', minWidth: 194, height: 52, borderRadius: 13, paddingHorizontal: 9, gap: 8 },
   calendarInstantTagBent: { transform: [{ translateY: 13 }] },
+  calendarInstantTagBentElder: { transform: [{ translateY: 18 }] },
   calendarInstantIcon: { width: 23, height: 23, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  calendarInstantIconElder: { width: 34, height: 34, borderRadius: 11 },
+  calendarInstantCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   calendarInstantTitle: { flex: 1, fontSize: 12, fontWeight: '800' },
   calendarInstantTime: { fontSize: 10, fontWeight: '800' },
+  calendarInstantTimeElder: { marginTop: 1 },
   nowLine: { position: 'absolute', left: -4, right: 7, minHeight: 24, zIndex: 6, flexDirection: 'row', alignItems: 'center', transform: [{ translateY: -12 }] },
   nowDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.danger },
   nowRule: { flex: 1, height: 1, backgroundColor: C.danger },
@@ -2820,6 +2866,9 @@ const styles = StyleSheet.create({
   trendBadge: { paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.sageSoft, borderRadius: 10, flexDirection: 'row', gap: 4, alignItems: 'center' },
   trendText: { color: C.sage, fontSize: 12, fontWeight: '800' },
   chart: { height: 172, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 24 },
+  statsEmpty: { height: 172, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  statsEmptyTitle: { color: C.ink, fontSize: 14, fontWeight: '800', marginTop: 10 },
+  statsEmptyText: { color: C.muted, fontSize: 12, marginTop: 4 },
   barColumn: { flex: 1, alignItems: 'center', height: '100%' },
   barTrack: { flex: 1, width: 19, borderRadius: 8, backgroundColor: '#F0F1EF', justifyContent: 'flex-end', overflow: 'hidden' },
   bar: { width: '100%', borderRadius: 8 },
