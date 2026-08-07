@@ -8,6 +8,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY app.json index.ts tsconfig.json App.tsx ./
 COPY src ./src
+COPY plugins ./plugins
 RUN pnpm exec expo export --platform web --output-dir dist
 
 FROM nginx:1.27-alpine
