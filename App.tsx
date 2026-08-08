@@ -346,6 +346,13 @@ function Icon({ name, size = 20, color = C.ink }: { name: IconName; size?: numbe
   return <MaterialCommunityIcons name={name} size={size} color={color} />;
 }
 
+function StableKeyboardRoot({ style, children }: React.PropsWithChildren<{ style?: any }>) {
+  if (Platform.OS === 'ios') {
+    return <KeyboardAvoidingView style={style} behavior="padding">{children}</KeyboardAvoidingView>;
+  }
+  return <View style={style}>{children}</View>;
+}
+
 function roleIcon(role: SavedRole): IconName {
   if (role.isAdmin) return 'shield-account-outline';
   if (role.name.includes('妈妈') || role.name.includes('奶奶') || role.name.includes('外婆')) return 'face-woman-outline';
@@ -391,6 +398,7 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
 
   const verifyAdminPin = async () => {
     if (!pendingAdminRole) return;
+    Keyboard.dismiss();
     setSaving(true);
     try {
       if (!await onVerifyAdminPin(pin)) {
@@ -408,7 +416,13 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
   const createCustomRole = () => {
     const name = customName.trim();
     if (!name) return;
+    Keyboard.dismiss();
     finishRole({ id: `family:${Date.now()}`, name, isAdmin: false, createdAt: new Date().toISOString() });
+  };
+
+  const closeAdminPin = () => {
+    Keyboard.dismiss();
+    setPendingAdminRole(null);
   };
 
   return (
@@ -446,9 +460,9 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
         </View>
       </ScrollView>
 
-      <Modal visible={!!pendingAdminRole} transparent animationType="fade" onRequestClose={() => setPendingAdminRole(null)}>
-        <KeyboardAvoidingView style={styles.adminPinModalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-          <Pressable style={styles.wheelBackdrop} onPress={() => setPendingAdminRole(null)} />
+      {pendingAdminRole && <Modal visible transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={closeAdminPin}>
+        <StableKeyboardRoot style={styles.adminPinModalRoot}>
+          <Pressable style={styles.wheelBackdrop} onPress={closeAdminPin} />
           <View style={styles.adminPinCard}>
             <View style={styles.adminPinIcon}><Icon name="shield-lock-outline" size={31} color={C.peach} /></View>
             <Text style={styles.adminPinTitle}>验证管理员身份</Text>
@@ -462,10 +476,10 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
             <TouchableOpacity style={[styles.rolePrimaryButton, pin.length < 4 && styles.roleButtonDisabled]} disabled={pin.length < 4 || saving} onPress={verifyAdminPin}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.rolePrimaryButtonText}>验证并进入</Text><Icon name="arrow-right" size={20} color="#FFFFFF" /></>}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.adminPinCancel} onPress={() => setPendingAdminRole(null)}><Text style={styles.adminPinCancelText}>取消</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.adminPinCancel} onPress={closeAdminPin}><Text style={styles.adminPinCancelText}>取消</Text></TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </StableKeyboardRoot>
+      </Modal>}
     </SafeAreaView>
   );
 }
@@ -744,9 +758,9 @@ export default function App() {
         ) : null}
       </View>
 
-      <AddRecordSheet
+      {addOpen && <AddRecordSheet
         key={addOpen ? `open:${todoDraft?.id ?? `${addIntent?.kind ?? 'picker'}:${addIntent?.customName ?? ''}`}` : 'closed'}
-        visible={addOpen}
+        visible
         preset={todoDraft}
         initialKind={addIntent?.kind}
         initialCustomName={addIntent?.customName}
@@ -760,9 +774,9 @@ export default function App() {
           setAddIntent(null);
         }}
         onSave={handleSave}
-      />
-      <BabyProfileSheet
-        visible={babyProfileOpen}
+      />}
+      {babyProfileOpen && <BabyProfileSheet
+        visible
         profile={babyProfile}
         onClose={() => setBabyProfileOpen(false)}
         onSave={(profile) => {
@@ -770,7 +784,7 @@ export default function App() {
           setBabyProfileOpen(false);
           showToast('宝宝资料已更新');
         }}
-      />
+      />}
       {Platform.OS !== 'web' && syncEndpointOpen && (
         <SyncEndpointSheet
           endpoint={syncEndpoint}
@@ -784,8 +798,8 @@ export default function App() {
           }}
         />
       )}
-      <RoleManagementSheet
-        visible={roleManagementOpen}
+      {roleManagementOpen && <RoleManagementSheet
+        visible
         roles={roles}
         currentRole={currentRole}
         onClose={() => setRoleManagementOpen(false)}
@@ -798,9 +812,9 @@ export default function App() {
           setRoleManagementOpen(false);
           showToast('用户与权限已更新');
         }}
-      />
-      <BackupRestoreSheet
-        visible={backupOpen}
+      />}
+      {backupOpen && <BackupRestoreSheet
+        visible
         backups={backups}
         onClose={() => setBackupOpen(false)}
         onBackupNow={async () => {
@@ -821,9 +835,9 @@ export default function App() {
           setBackupOpen(false);
           showToast(`已恢复 ${backup.localDate} 的备份`);
         }}
-      />
-      <ProjectSheet
-        visible={projectOpen}
+      />}
+      {projectOpen && <ProjectSheet
+        visible
         onClose={() => setProjectOpen(false)}
         onSave={(project) => {
           setCustomProjects((current) => [...current, project]);
@@ -833,8 +847,8 @@ export default function App() {
           setTab('today');
           showToast(`“${project.name}”已创建并显示在主页`);
         }}
-      />
-      <RecordDetailSheet
+      />}
+      {editingItem && <RecordDetailSheet
         key={editingItem?.id ?? 'closed-record'}
         item={editingItem}
         existingItems={editingItem ? items.filter((item) => item.dateKey === editingItem.dateKey) : []}
@@ -851,7 +865,7 @@ export default function App() {
           setEditingItem(null);
           showToast('记录已删除');
         }}
-      />
+      />}
     </SafeAreaView>
     </ElderModeContext.Provider>
   );
@@ -1771,6 +1785,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
   }, [visible, preset, initialKind, initialCustomName, initialTimeMode]);
 
   const close = () => {
+    Keyboard.dismiss();
     setSelected(null);
     setNote('');
     setRangeHasEnd(false);
@@ -1805,6 +1820,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
       ongoing: isOngoing,
     };
     const commit = () => {
+      Keyboard.dismiss();
       onSave(candidate);
       setSelected(null);
       setNote('');
@@ -1839,8 +1855,8 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <StableKeyboardRoot style={styles.modalRoot}>
         <Pressable style={styles.backdrop} onPress={close} />
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
@@ -1909,7 +1925,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
             />
           )}
         </View>
-      </KeyboardAvoidingView>
+      </StableKeyboardRoot>
     </Modal>
   );
 }
@@ -2060,10 +2076,14 @@ const WHEEL_MINUTES = Array.from({ length: 60 }, (_, index) => index);
 
 function TimePickerField({ value, onChange, color }: { value: string; onChange: (value: string) => void; color: string }) {
   const [open, setOpen] = useState(false);
+  const openPicker = () => {
+    Keyboard.dismiss();
+    setOpen(true);
+  };
   return (
     <>
       <View style={styles.timePickerFieldRow}>
-        <TouchableOpacity style={styles.timePickerButton} activeOpacity={0.72} onPress={() => setOpen(true)}>
+        <TouchableOpacity style={styles.timePickerButton} activeOpacity={0.72} onPress={openPicker}>
           <Icon name="clock-outline" size={19} color={color} />
           <Text style={styles.timePickerValue}>{value}</Text>
           <Text style={styles.timePickerHint}>滑动选择</Text>
@@ -2073,7 +2093,7 @@ function TimePickerField({ value, onChange, color }: { value: string; onChange: 
           <Text style={[styles.timeNowText, { color }]}>现在</Text>
         </TouchableOpacity>
       </View>
-      <WheelTimePicker visible={open} value={value} color={color} onClose={() => setOpen(false)} onChange={onChange} />
+      {open && <WheelTimePicker visible value={value} color={color} onClose={() => setOpen(false)} onChange={onChange} />}
     </>
   );
 }
@@ -2105,7 +2125,7 @@ function WheelTimePicker({ visible, value, color, onClose, onChange }: { visible
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={onClose}>
       <View style={styles.wheelModalRoot}>
         <Pressable style={styles.wheelBackdrop} onPress={onClose} />
         <View style={styles.wheelSheet}>
@@ -2208,15 +2228,20 @@ function BirthDatePickerField({ value, onChange }: { value: string; onChange: (v
     if (day > daysInMonth) setDay(daysInMonth);
   }, [day, daysInMonth]);
 
+  const openPicker = () => {
+    Keyboard.dismiss();
+    setOpen(true);
+  };
+
   return (
     <>
-      <TouchableOpacity style={styles.birthDateButton} onPress={() => setOpen(true)} activeOpacity={0.72}>
+      <TouchableOpacity style={styles.birthDateButton} onPress={openPicker} activeOpacity={0.72}>
         <Icon name="calendar-heart" size={20} color={C.peach} />
         <Text style={styles.birthDateValue}>{formatBirthDate(value)}</Text>
         <Text style={styles.timePickerHint}>滑动选择</Text>
         <Icon name="chevron-down" size={18} color={C.muted} />
       </TouchableOpacity>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      {open && <Modal visible transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={() => setOpen(false)}>
         <View style={styles.wheelModalRoot}>
           <Pressable style={styles.wheelBackdrop} onPress={() => setOpen(false)} />
           <View style={styles.wheelSheet}>
@@ -2239,7 +2264,7 @@ function BirthDatePickerField({ value, onChange }: { value: string; onChange: (v
             </View>
           </View>
         </View>
-      </Modal>
+      </Modal>}
     </>
   );
 }
@@ -2254,16 +2279,26 @@ function BabyProfileSheet({ visible, profile, onClose, onSave }: { visible: bool
     setBirthDate(profile.birthDate);
   }, [visible, profile]);
 
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
+
+  const save = () => {
+    Keyboard.dismiss();
+    onSave({ name: name.trim(), birthDate });
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <StableKeyboardRoot style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={[styles.sheet, styles.profileSheet]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderButton} />
             <View style={styles.sheetTitleWrap}><Text style={styles.sheetTitle}>宝宝资料</Text><Text style={styles.sheetSubtitle}>年龄将根据出生日期自动更新</Text></View>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={onClose}><Icon name="close" size={21} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} /></TouchableOpacity>
           </View>
           <View style={styles.profileForm}>
             <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{(name || '宝').slice(-1)}</Text></View>
@@ -2274,12 +2309,12 @@ function BabyProfileSheet({ visible, profile, onClose, onSave }: { visible: bool
               <BirthDatePickerField value={birthDate} onChange={setBirthDate} />
               <View style={styles.agePreview}><Icon name="cake-variant-outline" size={16} color={C.sage} /><Text style={styles.agePreviewText}>当前年龄：{babyAgeFromBirthDate(birthDate)}</Text></View>
             </Field>
-            <TouchableOpacity style={[styles.saveButton, { backgroundColor: name.trim() ? C.peach : '#C9CDD2' }]} disabled={!name.trim()} onPress={() => onSave({ name: name.trim(), birthDate })}>
+            <TouchableOpacity style={[styles.saveButton, { backgroundColor: name.trim() ? C.peach : '#C9CDD2' }]} disabled={!name.trim()} onPress={save}>
               <Icon name="check" size={19} color="#FFFFFF" /><Text style={styles.saveButtonText}>保存宝宝资料</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </StableKeyboardRoot>
     </Modal>
   );
 }
@@ -2371,16 +2406,28 @@ function RoleManagementSheet({ visible, roles, currentRole, onClose, onSave }: {
     setNewRoleName('');
   };
 
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
+
+  const save = async () => {
+    Keyboard.dismiss();
+    setSaving(true);
+    await onSave(draftRoles.map((role) => ({ ...role, name: role.name.trim() })));
+    setSaving(false);
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <StableKeyboardRoot style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={[styles.sheet, styles.managementSheet]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderButton} />
             <View style={styles.sheetTitleWrap}><Text style={styles.sheetTitle}>用户与权限</Text><Text style={styles.sheetSubtitle}>仅管理员可以修改或删除角色</Text></View>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={onClose}><Icon name="close" size={21} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.managementForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.adminInfoCard}><Icon name="shield-check-outline" size={22} color={C.peach} /><Text style={styles.adminInfoText}>爸爸、妈妈默认为管理员。当前正在使用的角色不能删除，家庭至少保留一名管理员。</Text></View>
@@ -2407,12 +2454,12 @@ function RoleManagementSheet({ visible, roles, currentRole, onClose, onSave }: {
               <TextInput style={[styles.input, { flex: 1 }]} value={newRoleName} onChangeText={setNewRoleName} placeholder="输入角色名称" placeholderTextColor="#A6ADB6" maxLength={12} />
               <TouchableOpacity style={[styles.addRoleButton, !newRoleName.trim() && { opacity: 0.45 }]} disabled={!newRoleName.trim()} onPress={addRole}><Icon name="plus" size={23} color="#FFFFFF" /></TouchableOpacity>
             </View>
-            <TouchableOpacity style={[styles.saveButton, { backgroundColor: C.navy }]} disabled={saving || draftRoles.some((role) => !role.name.trim())} onPress={async () => { setSaving(true); await onSave(draftRoles.map((role) => ({ ...role, name: role.name.trim() }))); setSaving(false); }}>
+            <TouchableOpacity style={[styles.saveButton, { backgroundColor: C.navy }]} disabled={saving || draftRoles.some((role) => !role.name.trim())} onPress={save}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Icon name="check" size={19} color="#FFFFFF" /><Text style={styles.saveButtonText}>保存用户设置</Text></>}
             </TouchableOpacity>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </StableKeyboardRoot>
     </Modal>
   );
 }
@@ -2420,7 +2467,7 @@ function RoleManagementSheet({ visible, roles, currentRole, onClose, onSave }: {
 function BackupRestoreSheet({ visible, backups, onClose, onBackupNow, onRestore }: { visible: boolean; backups: DailyBackup[]; onClose: () => void; onBackupNow: () => Promise<void>; onRestore: (backup: DailyBackup) => Promise<void> }) {
   const [working, setWorking] = useState(false);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={onClose}>
       <View style={styles.modalRoot}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, styles.backupSheet]}>
@@ -2464,16 +2511,27 @@ function ProjectSheet({ visible, onClose, onSave }: { visible: boolean; onClose:
   ];
   const selectedColor = colors[colorIndex]!;
   const selectedIcon = BABY_PROJECT_ICONS[iconIndex]!;
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
+  const save = () => {
+    Keyboard.dismiss();
+    onSave({ id: String(Date.now()), name: name.trim(), icon: selectedIcon.name, timeMode, ...selectedColor });
+    setName('');
+    setIconIndex(0);
+    setTimeMode('instant');
+  };
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <StableKeyboardRoot style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={[styles.sheet, styles.projectSheet]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderButton} />
             <View style={styles.sheetTitleWrap}><Text style={styles.sheetTitle}>新建自定义项目</Text><Text style={styles.sheetSubtitle}>创建你们家的专属记录</Text></View>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={onClose}><Icon name="close" size={21} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.projectForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={[styles.projectPreview, { backgroundColor: selectedColor.soft }]}><Icon name={selectedIcon.name} size={31} color={selectedColor.color} /></View>
@@ -2510,18 +2568,13 @@ function ProjectSheet({ visible, onClose, onSave }: { visible: boolean; onClose:
             <TouchableOpacity
               style={[styles.saveButton, { backgroundColor: name.trim() ? selectedColor.color : '#C9CDD2' }]}
               disabled={!name.trim()}
-              onPress={() => {
-                onSave({ id: String(Date.now()), name: name.trim(), icon: selectedIcon.name, timeMode, ...selectedColor });
-                setName('');
-                setIconIndex(0);
-                setTimeMode('instant');
-              }}
+              onPress={save}
             >
               <Icon name="plus" size={19} color="#FFFFFF" /><Text style={styles.saveButtonText}>创建项目</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </StableKeyboardRoot>
     </Modal>
   );
 }
@@ -2545,6 +2598,7 @@ function RecordDetailSheet({ item, existingItems, onClose, onDelete, onSave }: {
       ongoing: rangeItem ? !nextEndTime : false,
     });
   const saveEdited = (nextEndTime = endTime) => {
+    Keyboard.dismiss();
     const candidate = buildEdited(nextEndTime);
     const conflict = findRangeConflict(candidate, existingItems);
     if (conflict) {
@@ -2558,16 +2612,24 @@ function RecordDetailSheet({ item, existingItems, onClose, onDelete, onSave }: {
     onSave(candidate);
   };
   const editingConflict = rangeItem ? findRangeConflict(buildEdited(endTime || nowTime()), existingItems) : undefined;
+  const close = () => {
+    Keyboard.dismiss();
+    onClose();
+  };
+  const deleteRecord = () => {
+    Keyboard.dismiss();
+    onDelete();
+  };
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === 'android' ? 'height' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible transparent animationType="slide" statusBarTranslucent hardwareAccelerated onRequestClose={close}>
+      <StableKeyboardRoot style={styles.modalRoot}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={[styles.sheet, styles.editSheet]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={() => Alert.alert('删除记录？', '删除后将无法恢复。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: onDelete }])}><Icon name="trash-can-outline" size={20} color={C.danger} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={() => Alert.alert('删除记录？', '删除后将无法恢复。', [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: deleteRecord }])}><Icon name="trash-can-outline" size={20} color={C.danger} /></TouchableOpacity>
             <View style={styles.sheetTitleWrap}><Text style={styles.sheetTitle}>编辑记录</Text><Text style={styles.sheetSubtitle}>像编辑日历事件一样调整</Text></View>
-            <TouchableOpacity style={styles.sheetHeaderButton} onPress={onClose}><Icon name="close" size={21} /></TouchableOpacity>
+            <TouchableOpacity style={styles.sheetHeaderButton} onPress={close}><Icon name="close" size={21} /></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.editForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.editCategoryRow}>
@@ -2621,7 +2683,7 @@ function RecordDetailSheet({ item, existingItems, onClose, onDelete, onSave }: {
             </TouchableOpacity>
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </StableKeyboardRoot>
     </Modal>
   );
 }
