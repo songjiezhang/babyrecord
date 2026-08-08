@@ -39,6 +39,7 @@ import {
 } from './src/storage/roles';
 import { createDailyBackup, ensureTodayBackup, loadBackups, type BackupPayload, type DailyBackup } from './src/storage/backups';
 import { migrateEnvelope } from './src/data/schema';
+import { generateTodaySuggestions } from './src/data/todoSuggestions';
 import { loadSharedAppData, saveSharedAppData } from './src/storage/appData';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -586,6 +587,11 @@ export default function App() {
     () => items.filter((item) => item.dateKey === selectedDateKey).sort((a, b) => a.time.localeCompare(b.time)),
     [items, selectedDateKey],
   );
+  const todayTodos = useMemo(() => {
+    const suggested = generateTodaySuggestions(items, localDateKey());
+    const savedIds = new Set(todos.map((todo) => todo.id));
+    return [...todos, ...suggested.filter((todo) => !savedIds.has(todo.id))].sort((a, b) => a.time.localeCompare(b.time));
+  }, [items, todos]);
 
   const handleSave = (item: TimelineItem) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -644,7 +650,7 @@ export default function App() {
           <TodayScreen
             selectedDateKey={selectedDateKey}
             items={selectedItems}
-            todos={todos}
+            todos={todayTodos}
             customProjects={customProjects}
             quickShortcutIds={quickShortcutIds}
             onAdd={() => {
@@ -902,7 +908,7 @@ function TodayScreen({
               </View>
               <Text style={styles.calendarHint}>线标记时刻 · 色块表示时间段</Text>
             </View>
-            {items.length ? <CalendarTimeline items={items} onEdit={onEdit} /> : <EmptyDay day={dateTitle(selectedDateKey)} onAdd={onAdd} />}
+            {items.length ? <CalendarTimeline items={items} onEdit={onEdit} showCurrentTime={isToday} /> : <EmptyDay day={dateTitle(selectedDateKey)} onAdd={onAdd} />}
           </View>
         ) : (
           <EmptyDay day={dateTitle(selectedDateKey)} onAdd={onAdd} />
@@ -1044,7 +1050,7 @@ function minuteOfDay(time: string) {
   return Number(hour) * 60 + Number(minute);
 }
 
-function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (item: TimelineItem) => void }) {
+function CalendarTimeline({ items, onEdit, showCurrentTime }: { items: TimelineItem[]; onEdit: (item: TimelineItem) => void; showCurrentTime: boolean }) {
   const elderMode = useElderMode();
   const [clock, setClock] = useState(nowTime());
   const scrollRef = React.useRef<ScrollView>(null);
@@ -1057,19 +1063,22 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
   });
   const currentMinute = minuteOfDay(clock);
   const nowTop = ((currentMinute - CALENDAR_START_MINUTE) / span) * 100;
+  const firstItemMinute = visibleItems.length ? Math.min(...visibleItems.map((item) => minuteOfDay(item.time))) : 0;
 
   useEffect(() => {
+    if (!showCurrentTime) return undefined;
     const timer = setInterval(() => setClock(nowTime()), 30 * 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [showCurrentTime]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const currentY = ((currentMinute - CALENDAR_START_MINUTE) / span) * scrollHeight;
-      scrollRef.current?.scrollTo({ y: Math.max(0, currentY - 110), animated: false });
+      const targetMinute = showCurrentTime ? minuteOfDay(nowTime()) : firstItemMinute;
+      const targetY = ((targetMinute - CALENDAR_START_MINUTE) / span) * scrollHeight;
+      scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 110), animated: false });
     }, 80);
     return () => clearTimeout(timer);
-  }, [hourHeight, items.length]);
+  }, [hourHeight, items.length, firstItemMinute, showCurrentTime]);
 
   return (
     <View style={styles.calendarGrid}>
@@ -1084,17 +1093,19 @@ function CalendarTimeline({ items, onEdit }: { items: TimelineItem[]; onEdit: (i
             {CALENDAR_HOURS.map((hour, index) => (
               <View key={hour} style={[styles.calendarLine, { top: `${(index / (CALENDAR_HOURS.length - 1)) * 100}%` }]} />
             ))}
-            <View style={[styles.nowLine, { top: `${nowTop}%` }]}>
-              <View style={styles.nowDot} />
-              <Text numberOfLines={1} style={styles.nowLabel}>现在 {clock}</Text>
-              <View style={styles.nowRule} />
-            </View>
+            {showCurrentTime && (
+              <View style={[styles.nowLine, { top: `${nowTop}%` }]}>
+                <View style={styles.nowDot} />
+                <Text numberOfLines={1} style={styles.nowLabel}>现在 {clock}</Text>
+                <View style={styles.nowRule} />
+              </View>
+            )}
             {visibleItems.map((item) => {
               const type = typeFor(item.kind);
               const rangeItem = isRangeItem(item);
               const instantOverlapsRange = !rangeItem && items.some((other) => other.id !== item.id && isRangeItem(other) && pointFallsInsideRange(item.time, other, clock));
               const start = minuteOfDay(item.time);
-              const fallbackEnd = item.ongoing && currentMinute > start ? currentMinute : start + 40;
+              const fallbackEnd = showCurrentTime && item.ongoing && currentMinute > start ? currentMinute : start + 40;
               let end = item.endTime ? minuteOfDay(item.endTime) : fallbackEnd;
               if (end < start) end += 24 * 60;
               const top = Math.max(0, ((start - CALENDAR_START_MINUTE) / span) * 100);
@@ -2934,9 +2945,9 @@ const styles = StyleSheet.create({
   monthNavigatorText: { color: C.ink, fontSize: 13, fontWeight: '800' },
   monthCard: { backgroundColor: C.paper, borderRadius: 22, padding: 12, borderWidth: 1, borderColor: '#E7E8E5' },
   monthWeekRow: { flexDirection: 'row', marginBottom: 4 },
-  monthWeekText: { width: (SCREEN_WIDTH - 64) / 7, textAlign: 'center', color: '#7F8791', fontSize: 11, fontWeight: '700' },
+  monthWeekText: { flex: 1, textAlign: 'center', color: '#7F8791', fontSize: 11, fontWeight: '700' },
   monthGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  monthDayCell: { width: (SCREEN_WIDTH - 64) / 7, height: 47, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4 },
+  monthDayCell: { width: '14.285714%', height: 47, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4 },
   monthDayNumberWrap: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   monthDayNumberActive: { backgroundColor: C.navy },
   monthDayNumber: { color: C.ink, fontSize: 14, fontWeight: '700' },
