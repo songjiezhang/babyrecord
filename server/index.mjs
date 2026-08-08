@@ -11,15 +11,14 @@ function secretValue(name) {
   return file ? readFileSync(file, 'utf8').trim() : process.env[name]?.trim();
 }
 
-function readFirstSecret(names) {
-  for (const name of names) {
-    const value = secretValue(name);
-    if (value) return value;
-  }
-  throw new Error(`${names.join(' or ')} must be configured`);
+function readSecret(name) {
+  const value = secretValue(name);
+  if (!value) throw new Error(`${name} or ${name}_FILE must be configured`);
+  return value;
 }
 
-const accessPin = readFirstSecret(['ACCESS_PIN', 'ADMIN_PIN']);
+const accessPin = readSecret('ACCESS_PIN');
+const adminPin = readSecret('ADMIN_PIN');
 const attempts = new Map();
 
 function safeEqual(left, right) {
@@ -85,7 +84,8 @@ const server = createServer(async (request, response) => {
     if (isRateLimited(address)) return sendJson(response, 429, { ok: false });
     try {
       const body = await readJson(request);
-      const ok = safeEqual(body.pin ?? '', accessPin);
+      const expectedPin = url.pathname === '/auth/admin-pin' ? adminPin : accessPin;
+      const ok = safeEqual(body.pin ?? '', expectedPin);
       if (ok) attempts.delete(address);
       return sendJson(response, ok ? 200 : 401, { ok });
     } catch {
@@ -94,7 +94,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'POST' && url.pathname === '/sync') {
-    const syncKey = request.headers['x-sync-key'] ?? request.headers['x-sync-password'] ?? '';
+    const syncKey = request.headers['x-sync-key'] ?? '';
     if (!safeEqual(syncKey, accessPin)) {
       return sendJson(response, 401, { ok: false, error: 'unauthorized' });
     }

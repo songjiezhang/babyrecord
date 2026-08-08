@@ -31,7 +31,7 @@ Android / Web
 
 当前 UI 原型已经提供 `compose.yaml`、多阶段 Web 构建、轻量 API 和容器内 Nginx，默认映射 NAS 的 `8080` 端口。正式数据功能确定后，再在同一 Compose 中加入 `postgres` 和 `backup` 服务；公网反代配置不进入本仓库。
 
-`ACCESS_PIN` 必须放在 NAS 的 `.env` 或 Docker Secret 中，没有仓库默认值，也不会注入网页或 APK。它在设备首次进入时验证，并自动作为同步密钥；客户端通过 `X-Sync-Key` 请求头发送，避免出现在 URL、Nginx Proxy Manager 日志和浏览器历史中。升级兼容期内服务端仍接受旧变量名 `ADMIN_PIN`，同步接口也暂时兼容旧请求头 `X-Sync-Password`。
+`ACCESS_PIN` 与 `ADMIN_PIN` 必须分别放在 NAS 的 `.env` 或 Docker Secret 中，没有仓库默认值，也不会注入网页或 APK。`ACCESS_PIN` 在设备首次进入时验证，并自动作为同步密钥；客户端通过 `X-Sync-Key` 请求头发送，避免出现在 URL、Nginx Proxy Manager 日志和浏览器历史中。`ADMIN_PIN` 只用于爸爸、妈妈等管理员角色验证，不能用于同步。
 
 如果只在家庭网络访问，建议通过 NAS 自带反向代理或 Tailscale/WireGuard 接入，不直接把数据库或 WebDAV 端口暴露到公网。
 

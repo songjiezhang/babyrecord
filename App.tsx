@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { DEFAULT_SYNC_ENDPOINT, normalizeSyncEndpoint, verifyAccessPinWithServer } from './src/config/sync';
+import { DEFAULT_SYNC_ENDPOINT, normalizeSyncEndpoint, verifyAccessPinWithServer, verifyAdminPinWithServer } from './src/config/sync';
 import { APP_VERSION, androidApkDownloadUrl, fetchAppUpdate, isVersionNewer, type AppUpdateManifest } from './src/config/update';
 import {
   clearCurrentRole,
@@ -446,8 +446,11 @@ function AccessPinScreen({ onUnlock }: { onUnlock: (pin: string) => Promise<bool
   );
 }
 
-function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete: (role: SavedRole) => Promise<void> }) {
+function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: SavedRole[]; onComplete: (role: SavedRole) => Promise<void>; onVerifyAdminPin: (pin: string) => Promise<boolean> }) {
+  const [pin, setPin] = useState('');
+  const [pendingAdminRole, setPendingAdminRole] = useState<SavedRole | null>(null);
   const [customName, setCustomName] = useState('');
+  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   const finishRole = async (role: SavedRole) => {
@@ -457,7 +460,31 @@ function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete
   };
 
   const chooseRole = (role: SavedRole) => {
+    if (role.isAdmin) {
+      setPendingAdminRole(role);
+      setPin('');
+      setError('');
+      return;
+    }
     void finishRole(role);
+  };
+
+  const verifyAdminPin = async () => {
+    if (!pendingAdminRole) return;
+    Keyboard.dismiss();
+    setSaving(true);
+    setError('');
+    try {
+      if (!await onVerifyAdminPin(pin)) {
+        setError('管理员 PIN 不正确');
+        return;
+      }
+      await onComplete(pendingAdminRole);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法连接管理员认证服务');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const createCustomRole = () => {
@@ -465,6 +492,13 @@ function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete
     if (!name) return;
     Keyboard.dismiss();
     finishRole({ id: `family:${Date.now()}`, name, isAdmin: false, createdAt: new Date().toISOString() });
+  };
+
+  const closeAdminPin = () => {
+    Keyboard.dismiss();
+    setPendingAdminRole(null);
+    setPin('');
+    setError('');
   };
 
   return (
@@ -478,14 +512,14 @@ function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete
         <View style={styles.roleSelectCard}>
           <View style={styles.roleStepBadge}><Text style={styles.roleStepText}>首次设置</Text></View>
           <Text style={styles.roleTitle}>你是谁？</Text>
-          <Text style={styles.roleDescription}>家庭访问 PIN 已验证。选择角色后会自动保存在本设备。</Text>
+          <Text style={styles.roleDescription}>家庭访问 PIN 已验证。爸爸、妈妈等管理员角色还需要管理员 PIN。</Text>
           <View style={styles.roleGrid}>
             {roles.map((role) => (
               <TouchableOpacity key={role.id} style={styles.roleChoiceCard} onPress={() => chooseRole(role)} activeOpacity={0.76} disabled={saving}>
                 <View style={[styles.roleChoiceIcon, role.isAdmin && { backgroundColor: C.peachSoft }]}><Icon name={roleIcon(role)} size={24} color={role.isAdmin ? C.peach : C.sage} /></View>
                 <View style={styles.roleChoiceCopy}>
                   <Text style={styles.roleChoiceName}>{role.name}</Text>
-                  <Text style={styles.roleChoiceMeta}>{role.isAdmin ? '管理员' : '家庭成员'}</Text>
+                  <Text style={styles.roleChoiceMeta}>{role.isAdmin ? '管理员 · 需要管理员 PIN' : '家庭成员'}</Text>
                 </View>
                 <Icon name="chevron-right" size={19} color="#A8AFB7" />
               </TouchableOpacity>
@@ -501,6 +535,27 @@ function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete
           <Text style={styles.roleAutoSaveText}>角色保存后，下次打开会自动进入。</Text>
         </View>
       </ScrollView>
+
+      {pendingAdminRole && <Modal visible transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={closeAdminPin}>
+        <StableKeyboardRoot style={styles.adminPinModalRoot}>
+          <Pressable style={styles.wheelBackdrop} onPress={closeAdminPin} />
+          <View style={styles.adminPinCard}>
+            <View style={styles.adminPinIcon}><Icon name="shield-lock-outline" size={31} color={C.peach} /></View>
+            <Text style={styles.adminPinTitle}>验证管理员身份</Text>
+            <Text style={styles.adminPinDescription}>请输入“{pendingAdminRole.name}”的管理员 PIN。</Text>
+            <View style={[styles.pinInputWrap, !!error && styles.pinInputError]}>
+              <Icon name="lock-outline" size={21} color={error ? C.danger : C.navy} />
+              <TextInput value={pin} onChangeText={(value) => { setPin(value.replace(/\D/g, '').slice(0, 8)); setError(''); }} style={styles.pinInput} keyboardType="number-pad" secureTextEntry maxLength={8} placeholder="4–8 位 PIN" placeholderTextColor="#A6ADB6" autoFocus onSubmitEditing={() => { void verifyAdminPin(); }} />
+              <Text style={styles.pinCount}>{pin.length}/8</Text>
+            </View>
+            {!!error && <Text style={styles.pinErrorText}>{error}</Text>}
+            <TouchableOpacity style={[styles.rolePrimaryButton, pin.length < 4 && styles.roleButtonDisabled]} disabled={pin.length < 4 || saving} onPress={() => { void verifyAdminPin(); }}>
+              {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.rolePrimaryButtonText}>验证并进入</Text><Icon name="arrow-right" size={20} color="#FFFFFF" /></>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.adminPinCancel} onPress={closeAdminPin}><Text style={styles.adminPinCancelText}>取消</Text></TouchableOpacity>
+          </View>
+        </StableKeyboardRoot>
+      </Modal>}
     </SafeAreaView>
   );
 }
@@ -751,7 +806,7 @@ export default function App() {
   if (!currentRole) {
     return (
       <ElderModeContext.Provider value={false}>
-        <RoleSetupScreen roles={roles} onComplete={completeRoleSetup} />
+        <RoleSetupScreen roles={roles} onComplete={completeRoleSetup} onVerifyAdminPin={(pin) => verifyAdminPinWithServer(pin, syncEndpoint)} />
       </ElderModeContext.Provider>
     );
   }

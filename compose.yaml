@@ -8,8 +8,8 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      ACCESS_PIN: "${ACCESS_PIN:-}"
-      ADMIN_PIN: "${ADMIN_PIN:-}"
+      ACCESS_PIN: "${ACCESS_PIN:?请在 .env 中设置 ACCESS_PIN}"
+      ADMIN_PIN: "${ADMIN_PIN:?请在 .env 中设置 ADMIN_PIN}"
     security_opt:
       - no-new-privileges:true
     logging:

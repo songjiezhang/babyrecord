@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.0.6-beta.1';
+export const APP_VERSION = '1.0.6-beta.2';
 export const ANDROID_APK_NAME = `babyrecord-v${APP_VERSION}.apk`;
 
 export type AppUpdateManifest = {

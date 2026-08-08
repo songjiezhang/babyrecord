@@ -50,12 +50,9 @@ async function verifyPinAtPath(pin: string, endpoint: string, path: string) {
 }
 
 export async function verifyAccessPinWithServer(pin: string, endpoint: string) {
-  try {
-    return await verifyPinAtPath(pin, endpoint, 'auth/access-pin');
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('HTTP 404')) {
-      return verifyPinAtPath(pin, endpoint, 'auth/admin-pin');
-    }
-    throw error;
-  }
+  return verifyPinAtPath(pin, endpoint, 'auth/access-pin');
+}
+
+export async function verifyAdminPinWithServer(pin: string, endpoint: string) {
+  return verifyPinAtPath(pin, endpoint, 'auth/admin-pin');
 }
