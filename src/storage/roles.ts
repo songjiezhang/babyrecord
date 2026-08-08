@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { UserPreferencesV1 } from '../data/schema';
+import { migrateQuickShortcutIds } from '../data/records';
 
 // v2 intentionally starts a new role session because the permission model changed.
 const CURRENT_ROLE_KEY = '@babyrecord/current-role/v2';
@@ -56,9 +57,14 @@ export async function saveRoles(roles: SavedRole[]) {
 }
 
 export async function loadUserPreferences(userId: string) {
-  return readJson<UserPreferencesV1 | null>(`${USER_PREFERENCES_PREFIX}${userId}`, null);
+  const preferences = await readJson<UserPreferencesV1 | null>(`${USER_PREFERENCES_PREFIX}${userId}`, null);
+  if (!preferences) return null;
+  return { ...preferences, quickShortcutIds: migrateQuickShortcutIds(preferences.quickShortcutIds) };
 }
 
 export async function saveUserPreferences(preferences: UserPreferencesV1) {
-  await AsyncStorage.setItem(`${USER_PREFERENCES_PREFIX}${preferences.userId}`, JSON.stringify(preferences));
+  await AsyncStorage.setItem(`${USER_PREFERENCES_PREFIX}${preferences.userId}`, JSON.stringify({
+    ...preferences,
+    quickShortcutIds: migrateQuickShortcutIds(preferences.quickShortcutIds),
+  }));
 }

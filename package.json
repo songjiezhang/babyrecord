@@ -1,13 +1,15 @@
 {
   "name": "baby-daybook",
-  "version": "1.0.6-beta.2",
+  "version": "1.0.6-beta.3",
   "private": true,
   "main": "index.ts",
   "scripts": {
     "start": "expo start --clear",
     "android": "expo start --android",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.mjs"
   },
   "dependencies": {
     "@expo/config-plugins": "~54.0.5",

@@ -1,10 +1,11 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const port = Number.parseInt(process.env.PORT ?? '3000', 10);
 const packageManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const appVersion = String(process.env.APP_VERSION ?? packageManifest.version ?? '').trim();
 
 function secretValue(name) {
   const file = process.env[`${name}_FILE`]?.trim();
@@ -16,10 +17,6 @@ function readSecret(name) {
   if (!value) throw new Error(`${name} or ${name}_FILE must be configured`);
   return value;
 }
-
-const accessPin = readSecret('ACCESS_PIN');
-const adminPin = readSecret('ADMIN_PIN');
-const attempts = new Map();
 
 function safeEqual(left, right) {
   const a = Buffer.from(String(left));
@@ -53,7 +50,7 @@ function requestAddress(request) {
     || 'unknown';
 }
 
-function isRateLimited(address) {
+function isRateLimited(attempts, address) {
   const now = Date.now();
   const windowMs = 5 * 60 * 1000;
   const existing = attempts.get(address);
@@ -65,51 +62,65 @@ function isRateLimited(address) {
   return entry.count > 8;
 }
 
-const server = createServer(async (request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
+export function createBabyRecordServer({ accessPin, adminPin, appVersion = packageManifest.version }) {
+  if (!accessPin) throw new Error('accessPin must be configured');
+  if (!adminPin) throw new Error('adminPin must be configured');
+  const attempts = new Map();
 
-  if (request.method === 'GET' && url.pathname === '/health') {
-    return sendJson(response, 200, { ok: true });
-  }
+  return createServer(async (request, response) => {
+    const url = new URL(request.url ?? '/', 'http://localhost');
 
-  if (request.method === 'GET' && url.pathname === '/app-version') {
-    return sendJson(response, 200, {
-      version: appVersion,
-      prerelease: appVersion.includes('-'),
-    });
-  }
-
-  if (request.method === 'POST' && (url.pathname === '/auth/access-pin' || url.pathname === '/auth/admin-pin')) {
-    const address = requestAddress(request);
-    if (isRateLimited(address)) return sendJson(response, 429, { ok: false });
-    try {
-      const body = await readJson(request);
-      const expectedPin = url.pathname === '/auth/admin-pin' ? adminPin : accessPin;
-      const ok = safeEqual(body.pin ?? '', expectedPin);
-      if (ok) attempts.delete(address);
-      return sendJson(response, ok ? 200 : 401, { ok });
-    } catch {
-      return sendJson(response, 400, { ok: false });
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return sendJson(response, 200, { ok: true });
     }
-  }
 
-  if (request.method === 'POST' && url.pathname === '/sync') {
-    const syncKey = request.headers['x-sync-key'] ?? '';
-    if (!safeEqual(syncKey, accessPin)) {
-      return sendJson(response, 401, { ok: false, error: 'unauthorized' });
+    if (request.method === 'GET' && url.pathname === '/app-version') {
+      return sendJson(response, 200, {
+        version: appVersion,
+        prerelease: appVersion.includes('-'),
+      });
     }
-    return sendJson(response, 200, {
-      ok: true,
-      apiVersion: 1,
-      cursor: '0',
-      changes: [],
-      status: 'prototype',
-    });
-  }
 
-  return sendJson(response, 404, { ok: false, error: 'not_found' });
-});
+    if (request.method === 'POST' && (url.pathname === '/auth/access-pin' || url.pathname === '/auth/admin-pin')) {
+      const address = requestAddress(request);
+      if (isRateLimited(attempts, address)) return sendJson(response, 429, { ok: false });
+      try {
+        const body = await readJson(request);
+        const expectedPin = url.pathname === '/auth/admin-pin' ? adminPin : accessPin;
+        const ok = safeEqual(body.pin ?? '', expectedPin);
+        if (ok) attempts.delete(address);
+        return sendJson(response, ok ? 200 : 401, { ok });
+      } catch {
+        return sendJson(response, 400, { ok: false });
+      }
+    }
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`babyrecord api listening on ${port}`);
-});
+    if (request.method === 'POST' && url.pathname === '/sync') {
+      const syncKey = request.headers['x-sync-key'] ?? '';
+      if (!safeEqual(syncKey, accessPin)) {
+        return sendJson(response, 401, { ok: false, error: 'unauthorized' });
+      }
+      return sendJson(response, 200, {
+        ok: true,
+        apiVersion: 1,
+        cursor: '0',
+        changes: [],
+        status: 'prototype',
+      });
+    }
+
+    return sendJson(response, 404, { ok: false, error: 'not_found' });
+  });
+}
+
+const isEntryPoint = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+if (isEntryPoint) {
+  const server = createBabyRecordServer({
+    accessPin: readSecret('ACCESS_PIN'),
+    adminPin: readSecret('ADMIN_PIN'),
+    appVersion: String(process.env.APP_VERSION ?? packageManifest.version ?? '').trim(),
+  });
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`babyrecord api listening on ${port}`);
+  });
+}

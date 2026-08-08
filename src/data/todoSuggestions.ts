@@ -1,4 +1,6 @@
-export type SuggestionRecordKind = 'sleep' | 'feed' | 'activity' | 'diaper' | 'supplement' | 'custom';
+import type { RecordKind } from './records';
+
+export type SuggestionRecordKind = RecordKind;
 
 export type SuggestionRecord = {
   dateKey: string;

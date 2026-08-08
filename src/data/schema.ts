@@ -2,7 +2,7 @@
  * Persistent data must always be wrapped in a versioned envelope.
  * UI models may change freely; stored data is upgraded through explicit migrations.
  */
-export const CURRENT_DATA_SCHEMA_VERSION = 4;
+export const CURRENT_DATA_SCHEMA_VERSION = 5;
 
 export type VersionedDataEnvelope<T = unknown> = {
   schemaVersion: number;
@@ -104,11 +104,25 @@ function addDefaultBathProject(payload: unknown) {
   };
 }
 
+function promoteBathToBuiltInRecord(payload: unknown) {
+  if (!isObject(payload)) return payload;
+  const items = Array.isArray(payload.items)
+    ? payload.items.map((value) => isObject(value) && value.kind === 'custom' && value.title === '洗澡'
+      ? { ...value, kind: 'bath', timeMode: 'range' }
+      : value)
+    : payload.items;
+  const customProjects = Array.isArray(payload.customProjects)
+    ? payload.customProjects.filter((value) => !isObject(value) || value.id !== 'default-bath')
+    : [];
+  return { ...payload, items, customProjects };
+}
+
 // Published migrations are append-only and must stay deterministic.
 export const DATA_MIGRATIONS: DataMigration[] = [
   { from: 1, to: 2, migrate: addRecordTimeModes },
   { from: 2, to: 3, migrate: addRecordDatesAndRemovePrototypeData },
   { from: 3, to: 4, migrate: addDefaultBathProject },
+  { from: 4, to: 5, migrate: promoteBathToBuiltInRecord },
 ];
 
 export function migrateEnvelope(envelope: VersionedDataEnvelope): VersionedDataEnvelope {

@@ -41,6 +41,21 @@ import { createDailyBackup, ensureTodayBackup, loadBackups, type BackupPayload, 
 import { migrateEnvelope } from './src/data/schema';
 import { generateTodaySuggestions } from './src/data/todoSuggestions';
 import { exportAppData } from './src/data/exportData';
+import {
+  RECORD_CHOICES,
+  buildTimelineItem,
+  defaultChoiceFor,
+  durationBetween,
+  durationText as sleepDurationText,
+  findRangeConflict as findRecordRangeConflict,
+  isRangeItem,
+  minuteOfDay,
+  pointFallsInsideRange as recordPointFallsInsideRange,
+  timeModeFor,
+  type RecordKind,
+  type TimelineItem,
+  type TimeMode,
+} from './src/data/records';
 import { loadSharedAppData, saveSharedAppData } from './src/storage/appData';
 import { loadAccessPin, saveAccessPin } from './src/storage/access';
 
@@ -118,8 +133,6 @@ function TextInput({ style, maxFontSizeMultiplier, ...props }: TextInputProps) {
 }
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
-type RecordKind = 'sleep' | 'feed' | 'activity' | 'diaper' | 'supplement' | 'custom';
-type TimeMode = 'instant' | 'range';
 type TabKey = 'today' | 'calendar' | 'stats' | 'settings';
 
 type RecordType = {
@@ -129,19 +142,6 @@ type RecordType = {
   color: string;
   soft: string;
   timeMode: TimeMode;
-};
-
-type TimelineItem = {
-  id: string;
-  dateKey: string;
-  kind: RecordKind;
-  time: string;
-  endTime?: string;
-  title: string;
-  detail: string;
-  note?: string;
-  ongoing?: boolean;
-  timeMode?: TimeMode;
 };
 
 type CustomProject = {
@@ -190,6 +190,7 @@ const RECORD_TYPES: RecordType[] = [
   { key: 'activity', label: '活动', icon: 'teddy-bear', color: C.sage, soft: C.sageSoft, timeMode: 'range' },
   { key: 'diaper', label: '大小便', icon: 'baby-face-outline', color: C.amber, soft: C.amberSoft, timeMode: 'instant' },
   { key: 'supplement', label: '营养补充', icon: 'pill', color: C.peach, soft: C.peachSoft, timeMode: 'instant' },
+  { key: 'bath', label: '洗澡', icon: 'bathtub-outline', color: C.blue, soft: C.blueSoft, timeMode: 'range' },
   { key: 'custom', label: '自定义', icon: 'plus-circle-outline', color: C.pink, soft: C.pinkSoft, timeMode: 'instant' },
 ];
 
@@ -208,34 +209,17 @@ const BABY_PROJECT_ICONS: { name: IconName; label: string }[] = [
   { name: 'star-four-points-outline', label: '其他' },
 ];
 
-const DEFAULT_CUSTOM_PROJECTS: CustomProject[] = [
-  {
-    id: 'default-bath',
-    name: '洗澡',
-    icon: 'bathtub-outline',
-    color: C.blue,
-    soft: C.blueSoft,
-    timeMode: 'range',
-  },
-];
+const DEFAULT_CUSTOM_PROJECTS: CustomProject[] = [];
 
 const INITIAL_ITEMS: TimelineItem[] = [];
 const INITIAL_TODOS: TodoItem[] = [];
 
 function typeFor(kind: RecordKind): RecordType {
-  return RECORD_TYPES.find((item) => item.key === kind) ?? RECORD_TYPES[5]!;
-}
-
-function timeModeFor(kind: RecordKind, customMode: TimeMode = 'instant'): TimeMode {
-  return kind === 'custom' ? customMode : typeFor(kind).timeMode;
-}
-
-function isRangeItem(item: TimelineItem) {
-  return item.timeMode === 'range' || item.kind === 'sleep' || item.kind === 'activity';
+  return RECORD_TYPES.find((item) => item.key === kind) ?? RECORD_TYPES.find((item) => item.key === 'custom')!;
 }
 
 function shortcutOptions(customProjects: CustomProject[]): QuickShortcutOption[] {
-  const builtIn = RECORD_TYPES.slice(0, 5).map((item) => ({
+  const builtIn = RECORD_TYPES.filter((item) => item.key !== 'custom').map((item) => ({
     id: `record:${item.key}`,
     kind: item.key,
     label: item.label,
@@ -311,48 +295,12 @@ function fullDateTitle(value: string) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-function durationBetween(start: string, end: string) {
-  let minutes = minuteOfDay(end) - minuteOfDay(start);
-  if (minutes < 0) minutes += 24 * 60;
-  return minutes;
-}
-
-function sleepDurationText(start: string, end: string) {
-  const total = durationBetween(start, end);
-  const hours = Math.floor(total / 60);
-  const minutes = total % 60;
-  if (hours === 0) return `${minutes} 分钟`;
-  if (minutes === 0) return `${hours} 小时`;
-  return `${hours} 小时 ${minutes} 分`;
-}
-
-function rangeEndMinute(item: TimelineItem, currentTime = nowTime()) {
-  const start = minuteOfDay(item.time);
-  let end = minuteOfDay(item.endTime ?? (item.ongoing ? currentTime : item.time));
-  if (end < start) end += 24 * 60;
-  return end;
-}
-
-function rangesOverlap(first: TimelineItem, second: TimelineItem, currentTime = nowTime()) {
-  if (!isRangeItem(first) || !isRangeItem(second)) return false;
-  const firstStart = minuteOfDay(first.time);
-  const firstEnd = rangeEndMinute(first, currentTime);
-  const secondStart = minuteOfDay(second.time);
-  const secondEnd = rangeEndMinute(second, currentTime);
-  return [-24 * 60, 0, 24 * 60].some((shift) => firstStart < secondEnd + shift && firstEnd > secondStart + shift);
-}
-
 function findRangeConflict(candidate: TimelineItem, items: TimelineItem[]) {
-  if (!isRangeItem(candidate)) return undefined;
-  return items.find((item) => item.id !== candidate.id && isRangeItem(item) && rangesOverlap(candidate, item));
+  return findRecordRangeConflict(candidate, items, nowTime());
 }
 
 function pointFallsInsideRange(pointTime: string, range: TimelineItem, currentTime = nowTime()) {
-  if (!isRangeItem(range)) return false;
-  const point = minuteOfDay(pointTime);
-  const start = minuteOfDay(range.time);
-  const end = rangeEndMinute(range, currentTime);
-  return [-24 * 60, 0, 24 * 60].some((shift) => point >= start + shift && point <= end + shift);
+  return recordPointFallsInsideRange(pointTime, range, currentTime);
 }
 
 function Icon({ name, size = 20, color = C.ink }: { name: IconName; size?: number; color?: string }) {
@@ -1244,11 +1192,6 @@ const CALENDAR_END_MINUTE = 24 * 60;
 const CALENDAR_HOURS = Array.from({ length: 25 }, (_, index) => index);
 const CALENDAR_HOUR_HEIGHT = 58;
 
-function minuteOfDay(time: string) {
-  const [hour = '0', minute = '0'] = time.split(':');
-  return Number(hour) * 60 + Number(minute);
-}
-
 function CalendarTimeline({ items, onEdit, showCurrentTime }: { items: TimelineItem[]; onEdit: (item: TimelineItem) => void; showCurrentTime: boolean }) {
   const elderMode = useElderMode();
   const [clock, setClock] = useState(nowTime());
@@ -1819,7 +1762,7 @@ function SettingsScreen({
       </View>
       <Text style={styles.listHeading}>常用项目</Text>
       <View style={styles.projectList}>
-        {RECORD_TYPES.slice(0, 5).map((item) => (
+        {RECORD_TYPES.filter((item) => item.key !== 'custom').map((item) => (
           <ProjectRow key={item.key} icon={item.icon} color={item.color} soft={item.soft} name={item.label} description={projectDescription(item.key)} fixed />
         ))}
       </View>
@@ -1836,7 +1779,7 @@ function SettingsScreen({
         <View style={styles.addProjectIcon}><Icon name="plus" size={22} color={C.pink} /></View>
         <View style={styles.insightCopy}>
           <Text style={styles.addProjectTitle}>添加自定义项目</Text>
-          <Text style={styles.addProjectText}>例如辅食、洗澡、体温、药物</Text>
+          <Text style={styles.addProjectText}>例如辅食、体温、药物、护理</Text>
         </View>
         <Icon name="chevron-right" size={20} color={C.muted} />
       </TouchableOpacity>
@@ -1890,7 +1833,7 @@ function SettingsRow({ icon, color, soft, title, subtitle, value, attention, onP
 
 function projectDescription(kind: RecordKind) {
   const map: Partial<Record<RecordKind, string>> = {
-    sleep: '开始、结束与睡眠时长', feed: '母乳、奶瓶与毫升数', activity: '活动类型与持续时间', diaper: '大小便类型与状态', supplement: '铁剂、维生素 D、维生素 AD',
+    sleep: '开始、结束与睡眠时长', feed: '母乳、奶瓶与毫升数', activity: '活动类型与持续时间', diaper: '大小便类型与状态', supplement: '铁剂、维生素 D、维生素 AD', bath: '开始、结束与洗澡时长',
   };
   return map[kind] ?? '';
 }
@@ -1960,10 +1903,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
   const startingKind = preset?.kind ?? initialKind ?? null;
   const startingChoice = preset?.kind === 'supplement'
     ? preset.title.includes('铁') ? '铁剂' : preset.title.includes('AD') ? '维生素 AD' : '维生素 D'
-    : startingKind === 'activity' ? '户外散步'
-    : startingKind === 'diaper' ? '小便'
-    : startingKind === 'supplement' ? '维生素 D'
-    : '母乳瓶喂';
+    : defaultChoiceFor(startingKind);
   const [selected, setSelected] = useState<RecordKind | null>(startingKind);
   const [customName, setCustomName] = useState(initialCustomName ?? '');
   const [amount, setAmount] = useState('160');
@@ -1984,15 +1924,11 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
     setEndTime(nowTime());
     setRangeHasEnd(false);
     setNote('');
-    if (nextKind === 'feed') setChoice('母乳瓶喂');
-    if (nextKind === 'activity') setChoice('户外散步');
-    if (nextKind === 'diaper') setChoice('小便');
+    setChoice(defaultChoiceFor(nextKind));
     if (preset?.kind === 'supplement') {
       if (preset.title.includes('铁')) setChoice('铁剂');
       else if (preset.title.includes('AD')) setChoice('维生素 AD');
       else setChoice('维生素 D');
-    } else if (nextKind === 'supplement') {
-      setChoice('维生素 D');
     }
   }, [visible, preset, initialKind, initialCustomName, initialTimeMode]);
 
@@ -2006,31 +1942,19 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
 
   const save = () => {
     if (!selected) return;
-    const recordTimeMode = timeModeFor(selected, customTimeMode);
-    const isRange = recordTimeMode === 'range';
-    const isOngoing = isRange && !rangeHasEnd;
-    const rangeDetail = rangeHasEnd ? sleepDurationText(time, endTime) : '进行中 · 正在计时';
-    const definitions: Record<RecordKind, { title: string; detail: string }> = {
-      sleep: { title: '睡眠', detail: rangeHasEnd ? sleepDurationText(time, endTime) : '睡眠中 · 正在计时' },
-      feed: { title: choice, detail: choice === '母乳亲喂' ? '已记录' : `${amount || 0} ml` },
-      activity: { title: choice || '亲子活动', detail: rangeDetail },
-      diaper: { title: '换尿布', detail: choice },
-      supplement: { title: choice, detail: '1 次 · 已完成' },
-      custom: { title: customName || choice || '自定义记录', detail: isRange ? rangeDetail : '已记录' },
-    };
-    const definition = definitions[selected];
-    const candidate: TimelineItem = {
+    const candidate = buildTimelineItem({
       id: String(Date.now()),
       dateKey: targetDateKey,
       kind: selected,
-      timeMode: recordTimeMode,
       time,
-      endTime: isRange && rangeHasEnd ? endTime : undefined,
-      title: definition.title,
-      detail: definition.detail,
-      note: note || undefined,
-      ongoing: isOngoing,
-    };
+      endTime,
+      rangeHasEnd,
+      customTimeMode,
+      customName,
+      choice,
+      amount,
+      note,
+    });
     const commit = () => {
       Keyboard.dismiss();
       onSave(candidate);
@@ -2060,10 +1984,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
       setRangeHasEnd(false);
     }
     if (label) setCustomName(label);
-    if (kind === 'feed') setChoice('母乳瓶喂');
-    if (kind === 'activity') setChoice('户外散步');
-    if (kind === 'diaper') setChoice('小便');
-    if (kind === 'supplement') setChoice('维生素 D');
+    setChoice(defaultChoiceFor(kind));
   };
 
   return (
@@ -2085,7 +2006,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
           {!selected ? (
             <ScrollView contentContainerStyle={styles.kindGridWrap} showsVerticalScrollIndicator={false}>
               <View style={styles.kindGrid}>
-                {RECORD_TYPES.slice(0, 5).map((item) => (
+                {RECORD_TYPES.filter((item) => item.key !== 'custom').map((item) => (
                   <TouchableOpacity key={item.key} style={styles.kindTile} onPress={() => setKind(item.key)} activeOpacity={0.75}>
                     <View style={[styles.kindIcon, { backgroundColor: item.soft }]}><Icon name={item.icon} size={27} color={item.color} /></View>
                     <Text style={styles.kindLabel}>{item.label}</Text>
@@ -2143,7 +2064,7 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
 }
 
 function kindHint(kind: RecordKind) {
-  const hints: Record<RecordKind, string> = { sleep: '时间段 · 可计时', feed: '时刻 · 奶量与方式', activity: '时间段 · 可计时', diaper: '时刻 · 大便和小便', supplement: '时刻 · 铁剂与维生素', custom: '自选时刻或时间段' };
+  const hints: Record<RecordKind, string> = { sleep: '时间段 · 可计时', feed: '时刻 · 奶量与方式', activity: '时间段 · 可计时', diaper: '时刻 · 大便和小便', supplement: '时刻 · 铁剂与维生素', bath: '时间段 · 可计时', custom: '自选时刻或时间段' };
   return hints[kind];
 }
 
@@ -2168,13 +2089,7 @@ function RecordForm({ kind, time, setTime, endTime, setEndTime, rangeHasEnd, set
   setCustomName: (value: string) => void;
   onSave: () => void;
 }) {
-  const choices = useMemo(() => {
-    if (kind === 'feed') return ['母乳瓶喂', '母乳亲喂', '配方奶'];
-    if (kind === 'activity') return ['户外散步', '趴卧练习', '亲子阅读'];
-    if (kind === 'diaper') return ['小便', '大便', '大小便'];
-    if (kind === 'supplement') return ['铁剂', '维生素 D', '维生素 AD'];
-    return [];
-  }, [kind]);
+  const choices = RECORD_CHOICES[kind] ?? [];
   const type = typeFor(kind);
   const recordTimeMode = timeModeFor(kind, customTimeMode);
   const isRange = recordTimeMode === 'range';
@@ -2227,7 +2142,7 @@ function RecordForm({ kind, time, setTime, endTime, setEndTime, rangeHasEnd, set
       )}
       {kind === 'custom' && (
         <Field label="项目名称">
-          <TextInput style={styles.input} value={customName} onChangeText={setCustomName} placeholder="例如：辅食、洗澡、体温" placeholderTextColor="#A6ADB6" />
+          <TextInput style={styles.input} value={customName} onChangeText={setCustomName} placeholder="例如：辅食、体温、护理" placeholderTextColor="#A6ADB6" />
         </Field>
       )}
       {kind === 'feed' && choice !== '母乳亲喂' && (
