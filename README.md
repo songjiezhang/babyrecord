@@ -26,7 +26,8 @@ pnpm start
 - 时间段记录支持直接补齐起止时间，或先开始计时、稍后从今日页快速结束
 - 新建自定义项目时可选择“时刻 / 时间段”、颜色和宝宝常用图标，并加入快速记录入口
 - 每个用户独立设置主页显示的快捷记录项
-- 首次进入直接显示爸爸、妈妈、已创建角色和自定义入口；爸爸、妈妈默认是管理员，管理员 PIN 由 NAS 的 Compose 环境变量验证
+- APP 或网页首次进入时验证家庭访问 PIN，成功后保存在当前设备；随后直接显示爸爸、妈妈、已创建角色和自定义入口
+- 爸爸、妈妈默认是管理员，角色切换不重复要求 PIN
 - 设置页可切换角色；各角色的快捷项与长辈模式分别保存
 - 管理员可修改宝宝资料、管理用户，以及恢复最近 30 天的每日备份
 - 宝宝昵称、出生日期与自动年龄计算
@@ -40,7 +41,7 @@ pnpm start
 
 项目已经包含生产构建、Nginx 静态服务及 GHCR 自动发布工作流。推送到 `main`/`master` 后，GitHub Actions 会发布 `linux/amd64` 与 `linux/arm64` 的 `latest` 镜像。
 
-首次部署时复制 `.env.example` 为 `.env`，设置 `ADMIN_PIN` 与 `SYNC_PASSWORD`，确认 `GHCR_OWNER` 与 GitHub 仓库所有者一致，然后运行：
+首次部署时复制 `.env.example` 为 `.env`，设置 `ACCESS_PIN`，确认 `GHCR_OWNER` 与 GitHub 仓库所有者一致，然后运行：
 
 ```bash
 docker compose up -d
@@ -73,7 +74,7 @@ NAS 自部署与后续同源数据服务设计见 [`docs/NAS_SYNC_ARCHITECTURE.m
 
 网页镜像与 Android 更新方案见 [`docs/RELEASE_AND_UPDATE.md`](docs/RELEASE_AND_UPDATE.md)。
 
-> 当前 PIN 由同源 API 校验并限制尝试频率，但仍只是原型阶段的家庭角色门禁。正式同步版还需要服务端会话、权限校验和审计日志。
+> `ACCESS_PIN` 同时用于首次设备访问门禁和同步 API 鉴权。客户端通过 `X-Sync-Key` 请求头发送，不把 PIN 放进 URL、代理日志或项目源码。家庭 PIN 校验会限制尝试频率；正式同步版还需要服务端会话、权限校验和审计日志。
 
 ## 下一阶段建议
 

@@ -25,8 +25,8 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { DEFAULT_SYNC_ENDPOINT, DEFAULT_SYNC_PASSWORD, normalizeSyncEndpoint, verifyAdminPinWithServer } from './src/config/sync';
-import { ANDROID_APK_NAME, APP_VERSION, androidApkDownloadUrl } from './src/config/update';
+import { DEFAULT_SYNC_ENDPOINT, normalizeSyncEndpoint, verifyAccessPinWithServer } from './src/config/sync';
+import { APP_VERSION, androidApkDownloadUrl, fetchAppUpdate, isVersionNewer, type AppUpdateManifest } from './src/config/update';
 import {
   clearCurrentRole,
   DEFAULT_ROLES,
@@ -40,7 +40,9 @@ import {
 import { createDailyBackup, ensureTodayBackup, loadBackups, type BackupPayload, type DailyBackup } from './src/storage/backups';
 import { migrateEnvelope } from './src/data/schema';
 import { generateTodaySuggestions } from './src/data/todoSuggestions';
+import { exportAppData } from './src/data/exportData';
 import { loadSharedAppData, saveSharedAppData } from './src/storage/appData';
+import { loadAccessPin, saveAccessPin } from './src/storage/access';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -204,6 +206,17 @@ const BABY_PROJECT_ICONS: { name: IconName; label: string }[] = [
   { name: 'shower', label: '护理' },
   { name: 'emoticon-happy-outline', label: '情绪' },
   { name: 'star-four-points-outline', label: '其他' },
+];
+
+const DEFAULT_CUSTOM_PROJECTS: CustomProject[] = [
+  {
+    id: 'default-bath',
+    name: '洗澡',
+    icon: 'bathtub-outline',
+    color: C.blue,
+    soft: C.blueSoft,
+    timeMode: 'range',
+  },
 ];
 
 const INITIAL_ITEMS: TimelineItem[] = [];
@@ -373,11 +386,68 @@ function RoleLoadingScreen() {
   );
 }
 
-function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: SavedRole[]; onComplete: (role: SavedRole) => Promise<void>; onVerifyAdminPin: (pin: string) => Promise<boolean> }) {
+function AccessPinScreen({ onUnlock }: { onUnlock: (pin: string) => Promise<boolean> }) {
   const [pin, setPin] = useState('');
-  const [pendingAdminRole, setPendingAdminRole] = useState<SavedRole | null>(null);
-  const [customName, setCustomName] = useState('');
   const [error, setError] = useState('');
+  const [working, setWorking] = useState(false);
+
+  const unlock = async () => {
+    if (pin.length < 4 || working) return;
+    Keyboard.dismiss();
+    setWorking(true);
+    setError('');
+    try {
+      if (!await onUnlock(pin)) {
+        setError('家庭访问 PIN 不正确');
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法连接家庭认证服务');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.roleSafe}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={[styles.rolePage, styles.accessPinPage]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.roleBrandRow}>
+          <View style={styles.roleBrandIcon}><Icon name="baby-face-outline" size={31} color={C.peach} /></View>
+          <View><Text style={styles.roleBrandName}>宝宝日记</Text><Text style={styles.roleBrandSubtitle}>家庭数据仅供家人访问</Text></View>
+        </View>
+        <View style={styles.adminPinCard}>
+          <View style={styles.adminPinIcon}><Icon name="home-lock" size={31} color={C.peach} /></View>
+          <Text style={styles.adminPinTitle}>输入家庭访问 PIN</Text>
+          <Text style={styles.adminPinDescription}>首次在这台设备或浏览器进入时验证一次，成功后会自动保存。</Text>
+          <View style={[styles.pinInputWrap, !!error && styles.pinInputError]}>
+            <Icon name="lock-outline" size={21} color={error ? C.danger : C.navy} />
+            <TextInput
+              value={pin}
+              onChangeText={(value) => { setPin(value.replace(/\D/g, '').slice(0, 8)); setError(''); }}
+              style={styles.pinInput}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={8}
+              placeholder="4–8 位 PIN"
+              placeholderTextColor="#A6ADB6"
+              autoFocus
+              onSubmitEditing={() => { void unlock(); }}
+            />
+            <Text style={styles.pinCount}>{pin.length}/8</Text>
+          </View>
+          {!!error && <Text style={styles.pinErrorText}>{error}</Text>}
+          <TouchableOpacity style={[styles.rolePrimaryButton, pin.length < 4 && styles.roleButtonDisabled]} disabled={pin.length < 4 || working} onPress={() => { void unlock(); }}>
+            {working ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.rolePrimaryButtonText}>验证并继续</Text><Icon name="arrow-right" size={20} color="#FFFFFF" /></>}
+          </TouchableOpacity>
+          <Text style={styles.accessPinHint}>PIN 由 NAS Docker Compose 的环境变量设置，不会写入 APP 或网页代码。</Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function RoleSetupScreen({ roles, onComplete }: { roles: SavedRole[]; onComplete: (role: SavedRole) => Promise<void> }) {
+  const [customName, setCustomName] = useState('');
   const [saving, setSaving] = useState(false);
 
   const finishRole = async (role: SavedRole) => {
@@ -387,30 +457,7 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
   };
 
   const chooseRole = (role: SavedRole) => {
-    if (role.isAdmin) {
-      setPendingAdminRole(role);
-      setPin('');
-      setError('');
-      return;
-    }
-    finishRole(role);
-  };
-
-  const verifyAdminPin = async () => {
-    if (!pendingAdminRole) return;
-    Keyboard.dismiss();
-    setSaving(true);
-    try {
-      if (!await onVerifyAdminPin(pin)) {
-        setError('管理员 PIN 不正确');
-        return;
-      }
-      await onComplete(pendingAdminRole);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '无法连接认证服务');
-    } finally {
-      setSaving(false);
-    }
+    void finishRole(role);
   };
 
   const createCustomRole = () => {
@@ -418,11 +465,6 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
     if (!name) return;
     Keyboard.dismiss();
     finishRole({ id: `family:${Date.now()}`, name, isAdmin: false, createdAt: new Date().toISOString() });
-  };
-
-  const closeAdminPin = () => {
-    Keyboard.dismiss();
-    setPendingAdminRole(null);
   };
 
   return (
@@ -436,14 +478,14 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
         <View style={styles.roleSelectCard}>
           <View style={styles.roleStepBadge}><Text style={styles.roleStepText}>首次设置</Text></View>
           <Text style={styles.roleTitle}>你是谁？</Text>
-          <Text style={styles.roleDescription}>选择角色后会自动保存在本设备。爸爸、妈妈是管理员角色，需要验证 PIN。</Text>
+          <Text style={styles.roleDescription}>家庭访问 PIN 已验证。选择角色后会自动保存在本设备。</Text>
           <View style={styles.roleGrid}>
             {roles.map((role) => (
               <TouchableOpacity key={role.id} style={styles.roleChoiceCard} onPress={() => chooseRole(role)} activeOpacity={0.76} disabled={saving}>
                 <View style={[styles.roleChoiceIcon, role.isAdmin && { backgroundColor: C.peachSoft }]}><Icon name={roleIcon(role)} size={24} color={role.isAdmin ? C.peach : C.sage} /></View>
                 <View style={styles.roleChoiceCopy}>
                   <Text style={styles.roleChoiceName}>{role.name}</Text>
-                  <Text style={styles.roleChoiceMeta}>{role.isAdmin ? '管理员 · 需要 PIN' : '家庭成员'}</Text>
+                  <Text style={styles.roleChoiceMeta}>{role.isAdmin ? '管理员' : '家庭成员'}</Text>
                 </View>
                 <Icon name="chevron-right" size={19} color="#A8AFB7" />
               </TouchableOpacity>
@@ -456,35 +498,16 @@ function RoleSetupScreen({ roles, onComplete, onVerifyAdminPin }: { roles: Saved
           <TouchableOpacity style={[styles.rolePrimaryButton, !customName.trim() && styles.roleButtonDisabled]} disabled={!customName.trim() || saving} onPress={createCustomRole} activeOpacity={0.82}>
             {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Icon name="account-plus-outline" size={20} color="#FFFFFF" /><Text style={styles.rolePrimaryButtonText}>创建并进入</Text></>}
           </TouchableOpacity>
-          <Text style={styles.roleAutoSaveText}>角色保存后，下次打开无需再次选择或输入 PIN。</Text>
+          <Text style={styles.roleAutoSaveText}>角色保存后，下次打开会自动进入。</Text>
         </View>
       </ScrollView>
-
-      {pendingAdminRole && <Modal visible transparent animationType="fade" statusBarTranslucent hardwareAccelerated onRequestClose={closeAdminPin}>
-        <StableKeyboardRoot style={styles.adminPinModalRoot}>
-          <Pressable style={styles.wheelBackdrop} onPress={closeAdminPin} />
-          <View style={styles.adminPinCard}>
-            <View style={styles.adminPinIcon}><Icon name="shield-lock-outline" size={31} color={C.peach} /></View>
-            <Text style={styles.adminPinTitle}>验证管理员身份</Text>
-            <Text style={styles.adminPinDescription}>请输入“{pendingAdminRole?.name}”的 4–8 位管理员 PIN。</Text>
-            <View style={[styles.pinInputWrap, !!error && styles.pinInputError]}>
-              <Icon name="lock-outline" size={21} color={error ? C.danger : C.navy} />
-              <TextInput value={pin} onChangeText={(value) => { setPin(value.replace(/\D/g, '').slice(0, 8)); setError(''); }} style={styles.pinInput} keyboardType="number-pad" secureTextEntry maxLength={8} placeholder="4–8 位 PIN" placeholderTextColor="#A6ADB6" autoFocus onSubmitEditing={verifyAdminPin} />
-              <Text style={styles.pinCount}>{pin.length}/8</Text>
-            </View>
-            {!!error && <Text style={styles.pinErrorText}>{error}</Text>}
-            <TouchableOpacity style={[styles.rolePrimaryButton, pin.length < 4 && styles.roleButtonDisabled]} disabled={pin.length < 4 || saving} onPress={verifyAdminPin}>
-              {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.rolePrimaryButtonText}>验证并进入</Text><Icon name="arrow-right" size={20} color="#FFFFFF" /></>}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.adminPinCancel} onPress={closeAdminPin}><Text style={styles.adminPinCancelText}>取消</Text></TouchableOpacity>
-          </View>
-        </StableKeyboardRoot>
-      </Modal>}
     </SafeAreaView>
   );
 }
 
 export default function App() {
+  const [accessReady, setAccessReady] = useState(false);
+  const [accessVerified, setAccessVerified] = useState(false);
   const [roleReady, setRoleReady] = useState(false);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [dataReady, setDataReady] = useState(false);
@@ -508,9 +531,22 @@ export default function App() {
   const [elderMode, setElderMode] = useState(false);
   const [babyProfile, setBabyProfile] = useState<BabyProfile>({ name: '宝宝', birthDate: '' });
   const [syncEndpoint, setSyncEndpoint] = useState(Platform.OS === 'web' ? '/sync' : DEFAULT_SYNC_ENDPOINT);
-  const [syncPassword, setSyncPassword] = useState(DEFAULT_SYNC_PASSWORD);
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateManifest | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [quickShortcutIds, setQuickShortcutIds] = useState(['record:sleep', 'record:feed', 'record:diaper', 'record:supplement']);
-  const [customProjects, setCustomProjects] = useState<CustomProject[]>([]);
+  const [customProjects, setCustomProjects] = useState<CustomProject[]>(DEFAULT_CUSTOM_PROJECTS);
+  const promptedUpdateVersion = React.useRef<string | null>(null);
+  const updateCheckInFlight = React.useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    loadAccessPin().then((savedPin) => {
+      if (!active) return;
+      setAccessVerified(!!savedPin);
+      setAccessReady(true);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -554,7 +590,6 @@ export default function App() {
       setQuickShortcutIds(preferences?.quickShortcutIds ?? ['record:sleep', 'record:feed', 'record:diaper', 'record:supplement']);
       if (Platform.OS !== 'web') {
         setSyncEndpoint(preferences?.syncEndpoint ?? DEFAULT_SYNC_ENDPOINT);
-        setSyncPassword(preferences?.syncPassword ?? DEFAULT_SYNC_PASSWORD);
       }
       setPreferencesReady(true);
     });
@@ -568,10 +603,9 @@ export default function App() {
       quickShortcutIds,
       elderMode,
       syncEndpoint: Platform.OS === 'web' ? undefined : syncEndpoint,
-      syncPassword: Platform.OS === 'web' ? undefined : syncPassword,
       updatedAt: new Date().toISOString(),
     }).catch(() => undefined);
-  }, [currentRole, preferencesReady, dataReady, quickShortcutIds, elderMode, syncEndpoint, syncPassword]);
+  }, [currentRole, preferencesReady, dataReady, quickShortcutIds, elderMode, syncEndpoint]);
 
   const makeBackupPayload = (): BackupPayload => ({
     items,
@@ -596,6 +630,59 @@ export default function App() {
     setToast(message);
     setTimeout(() => setToast(''), 2200);
   };
+
+  const openAndroidUpdate = async (manifest: AppUpdateManifest) => {
+    const url = androidApkDownloadUrl(manifest.version);
+    if (!url) {
+      showToast('尚未配置 Android 更新下载地址');
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+    } catch {
+      showToast('无法打开更新下载地址');
+    }
+  };
+
+  const presentAndroidUpdate = (manifest: AppUpdateManifest) => {
+    Alert.alert(
+      manifest.prerelease ? '发现新的测试版本' : '发现新版本',
+      `当前版本 v${APP_VERSION}\n可更新至 v${manifest.version}`,
+      [
+        { text: '稍后', style: 'cancel' },
+        { text: '下载更新', onPress: () => { void openAndroidUpdate(manifest); } },
+      ],
+    );
+  };
+
+  const checkAndroidUpdate = async (showCurrentStatus: boolean) => {
+    if (Platform.OS !== 'android' || updateCheckInFlight.current) return;
+    updateCheckInFlight.current = true;
+    setCheckingUpdate(true);
+    try {
+      const manifest = await fetchAppUpdate(syncEndpoint);
+      if (isVersionNewer(manifest.version)) {
+        setAvailableUpdate(manifest);
+        if (showCurrentStatus || promptedUpdateVersion.current !== manifest.version) {
+          promptedUpdateVersion.current = manifest.version;
+          presentAndroidUpdate(manifest);
+        }
+      } else {
+        setAvailableUpdate(null);
+        if (showCurrentStatus) showToast(`当前已是最新版本 v${APP_VERSION}`);
+      }
+    } catch {
+      if (showCurrentStatus) showToast(`暂时无法检查更新 · 当前版本 v${APP_VERSION}`);
+    } finally {
+      updateCheckInFlight.current = false;
+      setCheckingUpdate(false);
+    }
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !accessVerified || !currentRole || !preferencesReady || !dataReady) return;
+    void checkAndroidUpdate(false);
+  }, [accessVerified, currentRole?.id, preferencesReady, dataReady, syncEndpoint]);
 
   const selectedItems = useMemo(
     () => items.filter((item) => item.dateKey === selectedDateKey).sort((a, b) => a.time.localeCompare(b.time)),
@@ -639,7 +726,7 @@ export default function App() {
     }
   };
 
-  if (!roleReady || !dataReady || (currentRole && !preferencesReady)) {
+  if (!accessReady || !roleReady || !dataReady || (currentRole && !preferencesReady)) {
     return (
       <ElderModeContext.Provider value={elderMode}>
         <RoleLoadingScreen />
@@ -647,10 +734,24 @@ export default function App() {
     );
   }
 
+  if (!accessVerified) {
+    return (
+      <ElderModeContext.Provider value={false}>
+        <AccessPinScreen onUnlock={async (pin) => {
+          const verified = await verifyAccessPinWithServer(pin, syncEndpoint);
+          if (!verified) return false;
+          await saveAccessPin(pin);
+          setAccessVerified(true);
+          return true;
+        }} />
+      </ElderModeContext.Provider>
+    );
+  }
+
   if (!currentRole) {
     return (
       <ElderModeContext.Provider value={false}>
-        <RoleSetupScreen roles={roles} onComplete={completeRoleSetup} onVerifyAdminPin={(pin) => verifyAdminPinWithServer(pin, syncEndpoint)} />
+        <RoleSetupScreen roles={roles} onComplete={completeRoleSetup} />
       </ElderModeContext.Provider>
     );
   }
@@ -698,6 +799,30 @@ export default function App() {
           <SettingsScreen
             customProjects={customProjects}
             onAdd={() => setProjectOpen(true)}
+            onDeleteCustomProject={(project) => {
+              const deleteProject = () => {
+                setCustomProjects((current) => current.filter((item) => item.id !== project.id));
+                setQuickShortcutIds((current) => current.filter((id) => id !== `custom:${project.id}`));
+                showToast(`“${project.name}”已删除`);
+              };
+              const message = '项目会从记录入口和主页快捷项中移除，已经保存的历史记录不会被删除。';
+              if (Platform.OS === 'web') {
+                if (globalThis.confirm(`删除“${project.name}”？\n\n${message}`)) deleteProject();
+                return;
+              }
+              Alert.alert(
+                `删除“${project.name}”？`,
+                message,
+                [
+                  { text: '取消', style: 'cancel' },
+                  {
+                    text: '删除',
+                    style: 'destructive',
+                    onPress: deleteProject,
+                  },
+                ],
+              );
+            }}
             babyProfile={babyProfile}
             onEditBabyProfile={() => setBabyProfileOpen(true)}
             currentRole={currentRole}
@@ -727,17 +852,24 @@ export default function App() {
               });
             }}
             syncEndpoint={syncEndpoint}
-            syncPasswordConfigured={!!syncPassword}
             onEditSyncEndpoint={() => setSyncEndpointOpen(true)}
-            onDownloadAndroid={async () => {
-              const url = androidApkDownloadUrl();
-              if (!url) {
-                Alert.alert('尚未配置下载地址', '请在构建环境中设置 GitHub 仓库和下载代理地址。');
-                return;
+            availableUpdate={availableUpdate}
+            checkingUpdate={checkingUpdate}
+            onCheckAndroidUpdate={() => { void checkAndroidUpdate(true); }}
+            onExport={async () => {
+              try {
+                const result = await exportAppData(makeBackupPayload());
+                if (result.status === 'cancelled') {
+                  showToast('已取消导出');
+                } else if (result.usedFallback) {
+                  showToast(`已下载 ${result.fileName}，请在浏览器下载目录查看`);
+                } else {
+                  showToast(`${result.fileName} 已保存`);
+                }
+              } catch {
+                showToast('导出失败，请重新选择保存位置');
               }
-              await Linking.openURL(url);
             }}
-            onExport={() => showToast('已准备导出 JSON / CSV')}
             elderMode={elderMode}
             onChangeElderMode={(enabled) => {
               LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -746,7 +878,7 @@ export default function App() {
             }}
           />
         )}
-        <BottomTabs active={tab} onChange={(nextTab) => {
+        <BottomTabs active={tab} settingsAttention={!!availableUpdate} onChange={(nextTab) => {
           if (nextTab === 'today') setSelectedDateKey(localDateKey());
           setTab(nextTab);
         }} />
@@ -788,11 +920,9 @@ export default function App() {
       {Platform.OS !== 'web' && syncEndpointOpen && (
         <SyncEndpointSheet
           endpoint={syncEndpoint}
-          password={syncPassword}
           onClose={() => setSyncEndpointOpen(false)}
-          onSave={(endpoint, password) => {
+          onSave={(endpoint) => {
             setSyncEndpoint(normalizeSyncEndpoint(endpoint));
-            setSyncPassword(password);
             setSyncEndpointOpen(false);
             showToast('同步接口已保存');
           }}
@@ -1493,6 +1623,7 @@ function InsightCard({ icon, color, soft, title, text }: { icon: IconName; color
 function SettingsScreen({
   customProjects,
   onAdd,
+  onDeleteCustomProject,
   elderMode,
   onChangeElderMode,
   babyProfile,
@@ -1506,13 +1637,15 @@ function SettingsScreen({
   quickShortcutIds,
   onToggleQuickShortcut,
   syncEndpoint,
-  syncPasswordConfigured,
   onEditSyncEndpoint,
-  onDownloadAndroid,
+  availableUpdate,
+  checkingUpdate,
+  onCheckAndroidUpdate,
   onExport,
 }: {
   customProjects: CustomProject[];
   onAdd: () => void;
+  onDeleteCustomProject: (project: CustomProject) => void;
   elderMode: boolean;
   onChangeElderMode: (enabled: boolean) => void;
   babyProfile: BabyProfile;
@@ -1526,10 +1659,11 @@ function SettingsScreen({
   quickShortcutIds: string[];
   onToggleQuickShortcut: (id: string) => void;
   syncEndpoint: string;
-  syncPasswordConfigured: boolean;
   onEditSyncEndpoint: () => void;
-  onDownloadAndroid: () => void;
-  onExport: () => void;
+  availableUpdate: AppUpdateManifest | null;
+  checkingUpdate: boolean;
+  onCheckAndroidUpdate: () => void;
+  onExport: () => void | Promise<void>;
 }) {
   const availableShortcuts = shortcutOptions(customProjects);
   return (
@@ -1640,7 +1774,7 @@ function SettingsScreen({
       </View>
       <View style={styles.projectList}>
         {customProjects.map((item) => (
-          <ProjectRow key={item.id} icon={item.icon} color={item.color} soft={item.soft} name={item.name} description={`${item.timeMode === 'range' ? '时间段' : '时刻'}记录 · 可在时间表中快速添加`} />
+          <ProjectRow key={item.id} icon={item.icon} color={item.color} soft={item.soft} name={item.name} description={`${item.timeMode === 'range' ? '时间段' : '时刻'}记录 · 可在时间表中快速添加`} onDelete={() => onDeleteCustomProject(item)} />
         ))}
       </View>
       <TouchableOpacity style={styles.addProjectButton} onPress={onAdd}>
@@ -1654,10 +1788,21 @@ function SettingsScreen({
       <Text style={styles.settingsSectionTitle}>{Platform.OS === 'web' ? '数据管理' : '数据与同步'}</Text>
       <Text style={styles.settingsSectionHint}>{Platform.OS === 'web' ? '网页端使用当前站点的同源服务，无需配置同步地址' : '设置 Android 同步接口，或随时导出自己的数据'}</Text>
       <View style={styles.settingsList}>
-        {Platform.OS !== 'web' && <SettingsRow icon="api" color={C.sage} soft={C.sageSoft} title="同步接口设置" subtitle={`${syncEndpoint || '未设置地址'} · 密码${syncPasswordConfigured ? '已设置' : '未设置'}`} value="HTTPS" onPress={onEditSyncEndpoint} />}
-        {Platform.OS === 'android' && <SettingsRow icon="cellphone-arrow-down" color={C.lavender} soft={C.lavenderSoft} title="Android 安装包" subtitle={`当前版本 v${APP_VERSION} · ${ANDROID_APK_NAME}`} value="下载" onPress={onDownloadAndroid} />}
+        {Platform.OS !== 'web' && <SettingsRow icon="api" color={C.sage} soft={C.sageSoft} title="同步接口设置" subtitle={syncEndpoint || '未设置地址'} value="HTTPS" onPress={onEditSyncEndpoint} />}
+        {Platform.OS === 'android' && <SettingsRow
+          icon="cellphone-arrow-down"
+          color={availableUpdate ? C.danger : C.lavender}
+          soft={availableUpdate ? '#FCEEEE' : C.lavenderSoft}
+          title="版本更新"
+          subtitle={availableUpdate
+            ? `当前 v${APP_VERSION} · ${availableUpdate.prerelease ? '测试版' : '新版本'} v${availableUpdate.version} 可用`
+            : `当前版本 v${APP_VERSION}`}
+          value={checkingUpdate ? '检查中' : availableUpdate ? '有更新' : undefined}
+          attention={!!availableUpdate}
+          onPress={onCheckAndroidUpdate}
+        />}
         {currentRole.isAdmin && <SettingsRow icon="backup-restore" color={C.blue} soft={C.blueSoft} title="备份与恢复" subtitle="每天自动备份 · 保留最近 30 天" value={`${backupCount} 份`} onPress={onOpenBackups} />}
-        <SettingsRow icon="file-export-outline" color={C.peach} soft={C.peachSoft} title="导出数据" subtitle="JSON / CSV / 儿保摘要" onPress={onExport} />
+        <SettingsRow icon="file-export-outline" color={C.peach} soft={C.peachSoft} title="导出数据" subtitle="完整 JSON 备份 · 可选择保存位置" onPress={onExport} />
       </View>
       <View style={styles.familyCard}>
         <View style={styles.familyAvatars}>
@@ -1673,7 +1818,7 @@ function SettingsScreen({
   );
 }
 
-function SettingsRow({ icon, color, soft, title, subtitle, value, onPress }: { icon: IconName; color: string; soft: string; title: string; subtitle: string; value?: string; onPress?: () => void }) {
+function SettingsRow({ icon, color, soft, title, subtitle, value, attention, onPress }: { icon: IconName; color: string; soft: string; title: string; subtitle: string; value?: string; attention?: boolean; onPress?: () => void }) {
   return (
     <TouchableOpacity style={styles.settingsRow} activeOpacity={0.72} onPress={onPress} disabled={!onPress}>
       <View style={[styles.settingsRowIcon, { backgroundColor: soft }]}><Icon name={icon} size={21} color={color} /></View>
@@ -1681,7 +1826,8 @@ function SettingsRow({ icon, color, soft, title, subtitle, value, onPress }: { i
         <Text style={styles.settingsRowTitle}>{title}</Text>
         <Text style={styles.settingsRowSubtitle}>{subtitle}</Text>
       </View>
-      {value && <Text style={styles.settingsRowValue}>{value}</Text>}
+      {attention && <View style={styles.updateDot} accessibilityLabel="有新版本" />}
+      {value && <Text style={[styles.settingsRowValue, attention && { color: C.danger }]}>{value}</Text>}
       <Icon name={onPress ? 'chevron-right' : 'lock-outline'} size={19} color="#A8AFB7" />
     </TouchableOpacity>
   );
@@ -1694,16 +1840,26 @@ function projectDescription(kind: RecordKind) {
   return map[kind] ?? '';
 }
 
-function ProjectRow({ icon, color, soft, name, description, fixed }: { icon: IconName; color: string; soft: string; name: string; description: string; fixed?: boolean }) {
+function ProjectRow({ icon, color, soft, name, description, fixed, onDelete }: { icon: IconName; color: string; soft: string; name: string; description: string; fixed?: boolean; onDelete?: () => void }) {
   return (
-    <TouchableOpacity style={styles.projectRow} activeOpacity={0.76}>
+    <View style={styles.projectRow}>
       <View style={[styles.projectIcon, { backgroundColor: soft }]}><Icon name={icon} size={22} color={color} /></View>
       <View style={styles.projectCopy}>
         <Text style={styles.projectName}>{name}</Text>
         <Text style={styles.projectDescription}>{description}</Text>
       </View>
-      {fixed ? <Text style={styles.fixedTag}>系统</Text> : <Icon name="drag-horizontal-variant" size={22} color="#BCC1C7" />}
-    </TouchableOpacity>
+      {fixed ? <Text style={styles.fixedTag}>系统</Text> : onDelete ? (
+        <TouchableOpacity
+          style={styles.projectDeleteButton}
+          activeOpacity={0.68}
+          onPress={onDelete}
+          accessibilityRole="button"
+          accessibilityLabel={`删除${name}`}
+        >
+          <Icon name="trash-can-outline" size={21} color={C.danger} />
+        </TouchableOpacity>
+      ) : null}
+    </View>
   );
 }
 
@@ -1719,7 +1875,7 @@ function PageHeader({ title, subtitle, icon }: { title: string; subtitle: string
   );
 }
 
-function BottomTabs({ active, onChange }: { active: TabKey; onChange: (key: TabKey) => void }) {
+function BottomTabs({ active, settingsAttention = false, onChange }: { active: TabKey; settingsAttention?: boolean; onChange: (key: TabKey) => void }) {
   const elderMode = useElderMode();
   const tabs: { key: TabKey; label: string; icon: IconName; activeIcon: IconName }[] = [
     { key: 'today', label: '今天', icon: 'calendar-blank-outline', activeIcon: 'calendar' },
@@ -1735,6 +1891,7 @@ function BottomTabs({ active, onChange }: { active: TabKey; onChange: (key: TabK
           <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => onChange(tab.key)} activeOpacity={0.75}>
             <View style={[styles.tabIcon, selected && styles.tabIconActive]}>
               <Icon name={selected ? tab.activeIcon : tab.icon} size={elderMode ? 24 : 21} color={selected ? C.navy : '#929AA5'} />
+              {tab.key === 'settings' && settingsAttention && <View style={styles.tabAttentionDot} />}
             </View>
             <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{tab.label}</Text>
           </TouchableOpacity>
@@ -1748,10 +1905,10 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
   const startingKind = preset?.kind ?? initialKind ?? null;
   const startingChoice = preset?.kind === 'supplement'
     ? preset.title.includes('铁') ? '铁剂' : preset.title.includes('AD') ? '维生素 AD' : '维生素 D'
-    : startingKind === 'activity' ? '趴卧练习'
+    : startingKind === 'activity' ? '户外散步'
     : startingKind === 'diaper' ? '小便'
     : startingKind === 'supplement' ? '维生素 D'
-    : '配方奶';
+    : '母乳瓶喂';
   const [selected, setSelected] = useState<RecordKind | null>(startingKind);
   const [customName, setCustomName] = useState(initialCustomName ?? '');
   const [amount, setAmount] = useState('160');
@@ -1772,8 +1929,8 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
     setEndTime(nowTime());
     setRangeHasEnd(false);
     setNote('');
-    if (nextKind === 'feed') setChoice('配方奶');
-    if (nextKind === 'activity') setChoice('趴卧练习');
+    if (nextKind === 'feed') setChoice('母乳瓶喂');
+    if (nextKind === 'activity') setChoice('户外散步');
     if (nextKind === 'diaper') setChoice('小便');
     if (preset?.kind === 'supplement') {
       if (preset.title.includes('铁')) setChoice('铁剂');
@@ -1848,8 +2005,8 @@ function AddRecordSheet({ visible, preset, initialKind, initialCustomName, initi
       setRangeHasEnd(false);
     }
     if (label) setCustomName(label);
-    if (kind === 'feed') setChoice('配方奶');
-    if (kind === 'activity') setChoice('趴卧练习');
+    if (kind === 'feed') setChoice('母乳瓶喂');
+    if (kind === 'activity') setChoice('户外散步');
     if (kind === 'diaper') setChoice('小便');
     if (kind === 'supplement') setChoice('维生素 D');
   };
@@ -1957,8 +2114,8 @@ function RecordForm({ kind, time, setTime, endTime, setEndTime, rangeHasEnd, set
   onSave: () => void;
 }) {
   const choices = useMemo(() => {
-    if (kind === 'feed') return ['配方奶', '母乳亲喂', '母乳瓶喂'];
-    if (kind === 'activity') return ['趴卧练习', '亲子阅读', '户外散步'];
+    if (kind === 'feed') return ['母乳瓶喂', '母乳亲喂', '配方奶'];
+    if (kind === 'activity') return ['户外散步', '趴卧练习', '亲子阅读'];
     if (kind === 'diaper') return ['小便', '大便', '大小便'];
     if (kind === 'supplement') return ['铁剂', '维生素 D', '维生素 AD'];
     return [];
@@ -2319,10 +2476,8 @@ function BabyProfileSheet({ visible, profile, onClose, onSave }: { visible: bool
   );
 }
 
-function SyncEndpointSheet({ endpoint, password, onClose, onSave }: { endpoint: string; password: string; onClose: () => void; onSave: (endpoint: string, password: string) => void }) {
+function SyncEndpointSheet({ endpoint, onClose, onSave }: { endpoint: string; onClose: () => void; onSave: (endpoint: string) => void }) {
   const [draft, setDraft] = useState(endpoint);
-  const [draftPassword, setDraftPassword] = useState(password);
-  const [showPassword, setShowPassword] = useState(false);
 
   const close = () => {
     Keyboard.dismiss();
@@ -2334,12 +2489,8 @@ function SyncEndpointSheet({ endpoint, password, onClose, onSave }: { endpoint: 
       Alert.alert('接口地址无效', '为保护宝宝数据，同步接口必须使用 HTTPS。');
       return;
     }
-    if (!draftPassword.trim()) {
-      Alert.alert('请输入同步密码', '同步密码仅保存在当前 Android 设备中，不会写入项目源码。');
-      return;
-    }
     Keyboard.dismiss();
-    onSave(draft, draftPassword.trim());
+    onSave(draft);
   };
 
   return (
@@ -2357,14 +2508,7 @@ function SyncEndpointSheet({ endpoint, password, onClose, onSave }: { endpoint: 
             <View style={[styles.projectPreview, { backgroundColor: C.sageSoft }]}><Icon name="api" size={31} color={C.sage} /></View>
             <Field label="HTTPS 接口地址">
               <TextInput style={[styles.input, styles.endpointInput]} value={draft} onChangeText={setDraft} autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
-              <Text style={styles.endpointHint}>Docker Compose 后端将通过此地址提供登录、记录和增量同步接口。</Text>
-            </Field>
-            <Field label="同步密码">
-              <View style={styles.passwordInputWrap}>
-                <TextInput style={styles.passwordInput} value={draftPassword} onChangeText={setDraftPassword} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} placeholder="输入服务器同步密码" placeholderTextColor="#A6ADB6" returnKeyType="done" onSubmitEditing={() => Keyboard.dismiss()} />
-                <TouchableOpacity style={styles.passwordEyeButton} onPress={() => setShowPassword((current) => !current)}><Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={C.muted} /></TouchableOpacity>
-              </View>
-              <Text style={styles.endpointHint}>密码只保存在本机；服务器正确密码由 Docker Compose 环境变量提供。</Text>
+              <Text style={styles.endpointHint}>家庭访问 PIN 会自动作为同步密钥，通过请求头发送，不会出现在接口地址或代理日志中。</Text>
             </Field>
             <TouchableOpacity style={[styles.saveButton, { backgroundColor: C.sage }]} onPress={save}>
               <Icon name="content-save-outline" size={19} color="#FFFFFF" /><Text style={styles.saveButtonText}>保存接口地址</Text>
@@ -2694,6 +2838,7 @@ const styles = StyleSheet.create({
   roleSafe: { flex: 1, backgroundColor: C.canvas, paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight : 0 },
   roleLoading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   rolePage: { flexGrow: 1, width: '100%', maxWidth: 540, alignSelf: 'center', paddingHorizontal: 20, paddingTop: 28, paddingBottom: 36 },
+  accessPinPage: { justifyContent: 'center' },
   roleBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 34 },
   roleBrandIcon: { width: 58, height: 58, borderRadius: 21, backgroundColor: C.peachSoft, alignItems: 'center', justifyContent: 'center' },
   roleBrandName: { color: C.ink, fontSize: 24, fontWeight: '800' },
@@ -2735,6 +2880,7 @@ const styles = StyleSheet.create({
   adminPinIcon: { width: 58, height: 58, borderRadius: 20, backgroundColor: C.peachSoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
   adminPinTitle: { color: C.ink, fontSize: 21, fontWeight: '800', textAlign: 'center', marginTop: 13 },
   adminPinDescription: { color: C.muted, fontSize: 13, textAlign: 'center', marginTop: 6, marginBottom: 18 },
+  accessPinHint: { color: C.muted, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12, paddingHorizontal: 8 },
   adminPinCancel: { height: 42, alignItems: 'center', justifyContent: 'center', marginTop: 5 },
   adminPinCancelText: { color: C.muted, fontSize: 14, fontWeight: '700' },
   safe: { flex: 1, backgroundColor: C.canvas, paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight : 0 },
@@ -2914,6 +3060,7 @@ const styles = StyleSheet.create({
   tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
   tabIcon: { minWidth: 40, height: 27, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   tabIconActive: { backgroundColor: '#EEF0F3' },
+  tabAttentionDot: { position: 'absolute', top: 1, right: 5, width: 9, height: 9, borderRadius: 5, backgroundColor: C.danger, borderWidth: 1.5, borderColor: C.paper },
   tabLabel: { color: '#7E8792', fontSize: 11, fontWeight: '600' },
   tabLabelActive: { color: C.navy, fontWeight: '800' },
   toast: { position: 'absolute', bottom: 137, alignSelf: 'center', backgroundColor: '#29384D', borderRadius: 99, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', gap: 8, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, elevation: 8 },
@@ -2958,6 +3105,7 @@ const styles = StyleSheet.create({
   projectCopy: { flex: 1 },
   projectName: { color: C.ink, fontSize: 14, fontWeight: '700' },
   projectDescription: { color: C.muted, fontSize: 12, marginTop: 4 },
+  projectDeleteButton: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FCEEEE', marginLeft: 8 },
   fixedTag: { color: '#8E969F', fontSize: 11, backgroundColor: '#F1F2F0', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 4 },
   customHeadingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   itemCount: { color: C.muted, fontSize: 11, marginBottom: 12 },
@@ -2996,6 +3144,7 @@ const styles = StyleSheet.create({
   settingsRowCopy: { flex: 1 },
   settingsRowTitle: { color: C.ink, fontSize: 15, fontWeight: '700' },
   settingsRowSubtitle: { color: C.muted, fontSize: 12, marginTop: 3 },
+  updateDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: C.danger, marginHorizontal: 6 },
   settingsRowValue: { color: C.muted, fontSize: 12, marginRight: 4 },
   dataPromiseCard: { marginTop: 11, backgroundColor: C.sageSoft, borderRadius: 17, padding: 14, flexDirection: 'row', alignItems: 'flex-start' },
   dataPromiseCopy: { flex: 1, marginLeft: 10 },

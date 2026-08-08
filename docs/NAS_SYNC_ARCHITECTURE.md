@@ -22,7 +22,7 @@ Android / Web
 
 ## Docker Compose 服务
 
-当前 Compose 已包含 `web` 与轻量 `api`，用于静态网页、管理员 PIN 校验和同步鉴权原型。正式功能阶段建议扩展为：
+当前 Compose 已包含 `web` 与轻量 `api`，用于静态网页、首次家庭访问 PIN 校验和同步鉴权原型。正式功能阶段建议扩展为：
 
 - `api`：提供登录、宝宝档案、记录增删改查、增量同步和家庭成员权限。
 - `postgres`：保存结构化数据，数据卷映射到 NAS 指定目录。
@@ -31,7 +31,7 @@ Android / Web
 
 当前 UI 原型已经提供 `compose.yaml`、多阶段 Web 构建、轻量 API 和容器内 Nginx，默认映射 NAS 的 `8080` 端口。正式数据功能确定后，再在同一 Compose 中加入 `postgres` 和 `backup` 服务；公网反代配置不进入本仓库。
 
-`ADMIN_PIN` 与 `SYNC_PASSWORD` 必须放在 NAS 的 `.env` 或 Docker Secret 中。二者没有仓库默认值，也不会注入网页或 APK；Android 用户在同步设置中输入密码后，仅保存在该设备本地。
+`ACCESS_PIN` 必须放在 NAS 的 `.env` 或 Docker Secret 中，没有仓库默认值，也不会注入网页或 APK。它在设备首次进入时验证，并自动作为同步密钥；客户端通过 `X-Sync-Key` 请求头发送，避免出现在 URL、Nginx Proxy Manager 日志和浏览器历史中。升级兼容期内服务端仍接受旧变量名 `ADMIN_PIN`，同步接口也暂时兼容旧请求头 `X-Sync-Password`。
 
 如果只在家庭网络访问，建议通过 NAS 自带反向代理或 Tailscale/WireGuard 接入，不直接把数据库或 WebDAV 端口暴露到公网。
 

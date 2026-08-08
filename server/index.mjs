@@ -3,16 +3,23 @@ import { readFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 
 const port = Number.parseInt(process.env.PORT ?? '3000', 10);
+const packageManifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const appVersion = String(process.env.APP_VERSION ?? packageManifest.version ?? '').trim();
 
-function readSecret(name) {
+function secretValue(name) {
   const file = process.env[`${name}_FILE`]?.trim();
-  const value = file ? readFileSync(file, 'utf8').trim() : process.env[name]?.trim();
-  if (!value) throw new Error(`${name} or ${name}_FILE must be configured`);
-  return value;
+  return file ? readFileSync(file, 'utf8').trim() : process.env[name]?.trim();
 }
 
-const adminPin = readSecret('ADMIN_PIN');
-const syncPassword = readSecret('SYNC_PASSWORD');
+function readFirstSecret(names) {
+  for (const name of names) {
+    const value = secretValue(name);
+    if (value) return value;
+  }
+  throw new Error(`${names.join(' or ')} must be configured`);
+}
+
+const accessPin = readFirstSecret(['ACCESS_PIN', 'ADMIN_PIN']);
 const attempts = new Map();
 
 function safeEqual(left, right) {
@@ -66,12 +73,19 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, { ok: true });
   }
 
-  if (request.method === 'POST' && url.pathname === '/auth/admin-pin') {
+  if (request.method === 'GET' && url.pathname === '/app-version') {
+    return sendJson(response, 200, {
+      version: appVersion,
+      prerelease: appVersion.includes('-'),
+    });
+  }
+
+  if (request.method === 'POST' && (url.pathname === '/auth/access-pin' || url.pathname === '/auth/admin-pin')) {
     const address = requestAddress(request);
     if (isRateLimited(address)) return sendJson(response, 429, { ok: false });
     try {
       const body = await readJson(request);
-      const ok = safeEqual(body.pin ?? '', adminPin);
+      const ok = safeEqual(body.pin ?? '', accessPin);
       if (ok) attempts.delete(address);
       return sendJson(response, ok ? 200 : 401, { ok });
     } catch {
@@ -80,7 +94,8 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'POST' && url.pathname === '/sync') {
-    if (!safeEqual(request.headers['x-sync-password'] ?? '', syncPassword)) {
+    const syncKey = request.headers['x-sync-key'] ?? request.headers['x-sync-password'] ?? '';
+    if (!safeEqual(syncKey, accessPin)) {
       return sendJson(response, 401, { ok: false, error: 'unauthorized' });
     }
     return sendJson(response, 200, {

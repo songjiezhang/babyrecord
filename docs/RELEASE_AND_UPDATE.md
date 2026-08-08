@@ -14,7 +14,7 @@ docker compose down
 docker compose up -d
 ```
 
-管理员 PIN 与同步密码来自 NAS 的 `.env`，不进入镜像。发布镜像也不包含家庭数据。
+家庭访问 PIN 来自 NAS 的 `.env`，不进入镜像；它同时保护首次进入和同步 API。发布镜像也不包含家庭数据。
 
 ## Android
 
@@ -23,9 +23,13 @@ docker compose up -d
 构建配置分为两类：
 
 - GitHub Actions Variables：`DEFAULT_SYNC_ENDPOINT`、`DOWNLOAD_PROXY_BASE`。它们会进入 APK，属于公开构建配置而非口令。
-- GitHub Actions Secrets：Android keystore、别名与密码。同步密码和管理员 PIN 不进入 GitHub 构建环境。
+- GitHub Actions Secrets：Android keystore、别名与密码。家庭访问 PIN 不进入 GitHub 构建环境。
 
 应用里的下载地址按“代理基础地址 + `github.com/<仓库>/releases/...`”生成。原生权限、Expo SDK 或依赖变化时发布新 APK；未来若启用 EAS Update，可再让同一原生版本接收兼容的 JavaScript 与资源更新。
+
+Android 启动后通过自部署 API 的 `GET /api/app-version` 检查版本，不访问 GitHub API。该接口只公开 API 镜像内的应用版本号和是否为测试版；发现更新后，APK 仍通过 `DOWNLOAD_PROXY_BASE` 配置的代理地址下载。网络或接口不可用时静默退化为仅显示当前版本，不产生误报。
+
+测试版使用语义化预发布版本号，例如 `1.0.6-beta.1`；确认稳定后发布不带后缀的版本，例如 `1.0.6`。发布前必须同步更新 `package.json`、`app.json` 和 `src/config/update.ts` 中的版本号。
 
 签名证书必须长期保存且不可更换，否则已安装设备不能直接升级。建议离线加密保留一份恢复副本，并定期验证能从备份重新签出相同证书指纹的安装包。
 

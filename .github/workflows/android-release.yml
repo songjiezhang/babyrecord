@@ -76,6 +76,8 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "babyrecord-${GITHUB_REF_NAME}.apk" --clobber
+          elif [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release create "$GITHUB_REF_NAME" "babyrecord-${GITHUB_REF_NAME}.apk" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes --prerelease
           else
             gh release create "$GITHUB_REF_NAME" "babyrecord-${GITHUB_REF_NAME}.apk" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
           fi

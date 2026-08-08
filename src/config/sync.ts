@@ -1,6 +1,11 @@
 export const DEFAULT_SYNC_ENDPOINT = process.env.EXPO_PUBLIC_DEFAULT_SYNC_ENDPOINT?.trim() ?? '';
-// Deliberately never supplied by a public build variable; users save it locally on Android.
-export const DEFAULT_SYNC_PASSWORD = '';
+
+export function syncRequestHeaders(accessPin: string) {
+  return {
+    'Content-Type': 'application/json',
+    'X-Sync-Key': accessPin,
+  };
+}
 
 export function normalizeSyncEndpoint(value: string) {
   const trimmed = value.trim();
@@ -17,12 +22,12 @@ function apiUrl(endpoint: string, path: string) {
   return `${base}/api/${path}`;
 }
 
-export async function verifyAdminPinWithServer(pin: string, endpoint: string) {
+async function verifyPinAtPath(pin: string, endpoint: string, path: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   let response: Response;
   try {
-    response = await fetch(apiUrl(endpoint, 'auth/admin-pin'), {
+    response = await fetch(apiUrl(endpoint, path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin }),
@@ -42,4 +47,15 @@ export async function verifyAdminPinWithServer(pin: string, endpoint: string) {
   const result = await response.json().catch(() => null) as { ok?: boolean } | null;
   if (!result) throw new Error('认证服务返回了无法识别的数据');
   return result.ok === true;
+}
+
+export async function verifyAccessPinWithServer(pin: string, endpoint: string) {
+  try {
+    return await verifyPinAtPath(pin, endpoint, 'auth/access-pin');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('HTTP 404')) {
+      return verifyPinAtPath(pin, endpoint, 'auth/admin-pin');
+    }
+    throw error;
+  }
 }

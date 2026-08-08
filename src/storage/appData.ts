@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { APP_VERSION } from '../config/update';
 import { CURRENT_DATA_SCHEMA_VERSION, migrateEnvelope, type VersionedDataEnvelope } from '../data/schema';
 
 const APP_DATA_KEY = '@babyrecord/shared-data/v2';
@@ -25,7 +26,7 @@ export async function saveSharedAppData(payload: SharedAppData) {
   const envelope: VersionedDataEnvelope<SharedAppData> = {
     schemaVersion: CURRENT_DATA_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    appVersion: '1.0.5',
+    appVersion: APP_VERSION,
     payload,
   };
   await AsyncStorage.setItem(APP_DATA_KEY, JSON.stringify(envelope));
